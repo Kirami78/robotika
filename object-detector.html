@@ -1,108 +1,116 @@
 <!DOCTYPE html>
-<html>
+<html lang="id">
 <head>
-  <meta charset="UTF-8" />
-  <title>TFJS Object Detection - FIX CAMERA</title>
-
-  <!-- Load TensorFlow -->
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.2.0/dist/tf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
-
-  <style>
-    body {
-      background: black;
-      margin: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      color: white;
-      font-family: Arial;
-    }
-    video, canvas {
-      width: 90vw;
-      max-width: 600px;
-      margin-top: 20px;
-      background: #222;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deteksi Objek + Warna + Jarak</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+    <style>
+        body {
+            background: #0d1117;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+        }
+        video, canvas {
+            border-radius: 12px;
+            margin-top: 20px;
+        }
+        #container {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+        }
+    </style>
 </head>
-
 <body>
+    <h1>Deteksi Objek + Warna + Estimasi Jarak</h1>
+    <p>Kamera harus diaktifkan. Jika tidak muncul, periksa izin kamera.</p>
 
-<h2>Camera Test + Object Detection (FIXED)</h2>
+    <div id="container">
+        <video id="video" width="500" height="375" autoplay playsinline></video>
+        <canvas id="canvas" width="500" height="375"></canvas>
+    </div>
 
-<video id="video" autoplay playsinline muted></video>
-<canvas id="canvas"></canvas>
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let model;
 
-<script>
-let model;
+        async function initCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+                return new Promise(resolve => video.onloadedmetadata = resolve);
+            } catch (error) {
+                alert('Gagal membuka kamera. Izinkan akses kamera.');
+            }
+        }
 
-async function initCamera() {
-  const video = document.getElementById("video");
+        function detectDominantColor(imageData) {
+            let r = 0, g = 0, b = 0;
+            const data = imageData.data;
+            const length = data.length / 4;
 
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-        facingMode: "environment"
-      },
-      audio: false
-    });
+            for (let i = 0; i < data.length; i += 4) {
+                r += data[i];
+                g += data[i + 1];
+                b += data[i + 2];
+            }
 
-    video.srcObject = stream;
+            r = Math.round(r / length);
+            g = Math.round(g / length);
+            b = Math.round(b / length);
 
-    return new Promise(resolve => {
-      video.onloadedmetadata = () => {
-        console.log("Camera ready:", video.videoWidth, "x", video.videoHeight);
-        video.play();
-        resolve(video);
-      };
-    });
+            return `rgb(${r}, ${g}, ${b})`;
+        }
 
-  } catch (err) {
-    console.error("Camera Error:", err);
-    alert("Tidak bisa membuka kamera.\nIjinkan kamera di browser kamu.");
-  }
-}
+        function estimateDistance(bboxHeight) {
+            const knownObjectHeight = 0.15; // 15 cm (contoh)
+            const focalLength = 500;        // nilai asumsi
+            return (knownObjectHeight * focalLength) / (bboxHeight * 0.0026);
+        }
 
-async function start() {
-  const video = await initCamera();
+        async function startDetection() {
+            model = await cocoSsd.load();
 
-  const canvas = document.getElementById("canvas");
-  const ctx = canvas.getContext("2d");
+            async function detect() {
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
+                const predictions = await model.detect(video);
 
-  model = await cocoSsd.load();
-  console.log("Model loaded");
+                predictions.forEach(pred => {
+                    const [x, y, width, height] = pred.bbox;
 
-  async function detect() {
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    const imageData = ctx.getImageData(x, y, width, height);
+                    const color = detectDominantColor(imageData);
 
-    const predictions = await model.detect(video);
+                    const distance = estimateDistance(height).toFixed(2);
 
-    predictions.forEach(pred => {
-      const [x, y, w, h] = pred.bbox;
+                    ctx.strokeStyle = 'lime';
+                    ctx.lineWidth = 3;
+                    ctx.strokeRect(x, y, width, height);
 
-      ctx.strokeStyle = "cyan";
-      ctx.lineWidth = 3;
-      ctx.strokeRect(x, y, w, h);
+                    ctx.fillStyle = 'lime';
+                    ctx.font = '16px Arial';
+                    ctx.fillText(`${pred.class}`, x, y - 25);
+                    ctx.fillText(`Warna: ${color}`, x, y - 10);
+                    ctx.fillText(`Jarak: ${distance} m`, x, y + height + 20);
+                });
 
-      ctx.fillStyle = "cyan";
-      ctx.font = "16px Arial";
-      ctx.fillText(pred.class + " " + (pred.score * 100).toFixed(1) + "%", x, y - 5);
-    });
+                requestAnimationFrame(detect);
+            }
 
-    requestAnimationFrame(detect);
-  }
+            detect();
+        }
 
-  detect();
-}
-
-start();
-</script>
-
+        (async () => {
+            await initCamera();
+            await startDetection();
+        })();
+    </script>
 </body>
 </html>
