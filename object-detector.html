@@ -1,172 +1,212 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="id">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>YOLOv8 Web Object Detector</title>
-  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
-
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>EfficientDet-Lite (TFJS/TFLite) — Object Detector (MANTEP)</title>
   <style>
-    body {
-      margin: 0;
-      background: #0d1117;
-      color: white;
-      font-family: "Segoe UI", sans-serif;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
+    :root{
+      --bg:#0b1220; --card:#0f1724; --accent:#00d1ff; --muted:#93a3b8;
+      --glass: rgba(255,255,255,0.03);
     }
-
-    h2 {
-      margin-top: 20px;
-      font-weight: 600;
-    }
-
-    #container {
-      position: relative;
-      width: 80vw;
-      max-width: 700px;
-    }
-
-    video, canvas {
-      width: 100%;
-      border-radius: 12px;
-    }
-
-    #panel {
-      margin-top: 20px;
-      background: rgba(255, 255, 255, 0.08);
-      padding: 15px 20px;
-      border-radius: 12px;
-      width: 80vw;
-      max-width: 700px;
-    }
-
-    #panel input {
-      width: 100%;
-    }
-
-    #loading {
-      margin-top: 20px;
-      color: #58a6ff;
-      font-size: 18px;
-    }
+    html,body{height:100%;margin:0;font-family:Inter, ui-sans-serif, system-ui; background:linear-gradient(180deg,var(--bg),#07101a); color:#e6f0fb;}
+    .wrap{max-width:1100px;margin:18px auto;padding:18px;display:grid;grid-template-columns: 1fr 360px; gap:18px;}
+    header{grid-column:1/-1; display:flex;align-items:center;gap:12px;}
+    header h1{margin:0;font-size:18px;letter-spacing:0.2px}
+    .card{background:var(--card);border-radius:12px;padding:12px;box-shadow: 0 6px 20px rgba(0,0,0,0.6); border:1px solid rgba(255,255,255,0.03);}
+    #viewer{position:relative;border-radius:10px; overflow:hidden;}
+    video, canvas{display:block;width:100%;height:auto;max-height:640px;background:#000;object-fit:cover;}
+    canvas{position:absolute;left:0;top:0;pointer-events:none;}
+    .controls{display:flex;flex-direction:column;gap:10px;}
+    label.small{font-size:12px;color:var(--muted);}
+    .row{display:flex;gap:8px;align-items:center;}
+    select,input[type="range"]{width:100%;}
+    button{padding:8px 10px;border-radius:8px;border:none;background:var(--accent);color:#012;cursor:pointer;font-weight:600;}
+    .muted{color:var(--muted);font-size:13px;}
+    #status{font-size:13px;color:var(--muted);margin-top:8px;}
+    .skeleton{height:10px;background:linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.06), rgba(255,255,255,0.02));border-radius:6px;}
+    .stats{display:flex;gap:8px;flex-wrap:wrap;}
+    .chip{background:var(--glass);padding:6px 8px;border-radius:8px;font-size:13px;color:var(--muted);}
+    .legend{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+    .legend .item{display:flex;gap:6px;align-items:center;padding:6px 8px;background:rgba(255,255,255,0.02);border-radius:8px;font-size:13px}
+    footer{grid-column:1/-1;color:var(--muted);font-size:12px;margin-top:8px;}
   </style>
 </head>
 <body>
+  <div class="wrap">
+    <header>
+      <h1>EfficientDet-Lite0 — Object Detector (TFJS + TFLite) — MANTEP</h1>
+      <div class="muted">Fast | Accurate for small objects | Runs fully in-browser</div>
+    </header>
 
-  <h2>YOLOv8 Web Object Detector</h2>
-  <div id="loading">Loading model... please wait</div>
+    <div class="card" id="left">
+      <div id="viewer">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
 
-  <div id="container">
-    <video id="cam" autoplay playsinline></video>
-    <canvas id="canvas"></canvas>
+      <div style="display:flex;gap:10px;margin-top:10px;align-items:center;">
+        <button id="start">Start Camera</button>
+        <button id="stop" disabled>Stop</button>
+        <button id="snapshot">Snapshot</button>
+        <input id="file" type="file" accept="image/*,video/*" style="margin-left:auto">
+      </div>
+
+      <div id="status" class="card" style="margin-top:12px;">
+        <div id="modelStatus">Model: <span class="muted">memuat...</span></div>
+        <div style="margin-top:6px;" class="stats">
+          <div class="chip">FPS: <span id="fps">-</span></div>
+          <div class="chip">Objects: <span id="objCount">-</span></div>
+          <div class="chip">Backend: <span id="backend">tfjs</span></div>
+        </div>
+        <div id="log" class="muted" style="margin-top:8px">Tip: tambahkan pencahayaan kalau deteksi kurang akurat.</div>
+      </div>
+    </div>
+
+    <aside class="card">
+      <div class="controls">
+        <label class="small">Model (.tflite) path (taruh file di folder yang sama)</label>
+        <input id="modelUrl" type="text" value="./efficientdet_lite0.tflite" />
+        <div class="row">
+          <label class="small">Confidence threshold</label>
+          <input id="threshold" type="range" min="0.1" max="0.9" step="0.01" value="0.25"/>
+        </div>
+        <div class="row">
+          <label class="small">Max detections</label>
+          <input id="maxDet" type="number" min="1" max="100" value="50" style="width:100px"/>
+        </div>
+
+        <div class="row">
+          <label class="small">Backend</label>
+          <select id="backendSelect">
+            <option value="webgl">WebGL</option>
+            <option value="wasm">WASM</option>
+          </select>
+        </div>
+
+        <div style="display:flex;gap:8px;">
+          <button id="loadModel">Load/Reload Model</button>
+          <button id="warmup">Warm Up</button>
+        </div>
+
+        <div class="legend" id="legend"></div>
+
+        <div style="margin-top:8px;">
+          <div class="muted">Notes:</div>
+          <ul class="muted" style="padding-left:18px;margin:6px 0;">
+            <li>Tempatkan file <code>efficientdet_lite0.tflite</code> di folder yang sama atau ganti path di atas.</li>
+            <li>Jalankan lewat local server agar model dapat di-fetch (mis. <code>npx http-server</code>).</li>
+          </ul>
+        </div>
+      </div>
+    </aside>
+
+    <footer>
+      Menggunakan TF.js TFLite runtime (tflite.loadTFLiteModel) & EfficientDet-Lite (ringan & cocok untuk web). Model TFLite bisa diambil dari TensorFlow Hub / Colab. (TFJS TFLite docs & EfficientDet-Lite reference). 
+    </footer>
   </div>
 
-  <div id="panel">
-    <label>Confidence Threshold: <span id="tval">0.3</span></label>
-    <input type="range" id="thr" min="0.1" max="0.9" value="0.3" step="0.01" />
-  </div>
+  <!-- TensorFlow.js core -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
+  <!-- TFJS TFLite runtime (enables running .tflite in browser) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-tflite@0.0.1-alpha.8/dist/tf-tflite.min.js"></script>
 
-<script>
-const video = document.getElementById("cam");
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
-const thr = document.getElementById("thr");
-const tval = document.getElementById("tval");
-const loading = document.getElementById("loading");
+  <script>
+  // Short citations for developer: tfjs-tflite allows loading .tflite in browser; EfficientDet-Lite exists on TF Hub.
+  // See: https://js.tensorflow.org/api_tflite/ and TensorFlow blog for EfficientDet-Lite.
+  // (We used web.run for references when building this.)
 
-let session;
+  const video = document.getElementById('video');
+  const overlay = document.getElementById('overlay');
+  const ctx = overlay.getContext('2d');
+  const startBtn = document.getElementById('start');
+  const stopBtn = document.getElementById('stop');
+  const snapshotBtn = document.getElementById('snapshot');
+  const fileIn = document.getElementById('file');
+  const modelUrlInput = document.getElementById('modelUrl');
+  const loadBtn = document.getElementById('loadModel');
+  const warmupBtn = document.getElementById('warmup');
+  const thresholdEl = document.getElementById('threshold');
+  const maxDetEl = document.getElementById('maxDet');
+  const backendSelect = document.getElementById('backendSelect');
 
-// Replace this with your model URL
-const MODEL_URL = "yolov8n.onnx"; // <-- place file in same folder
+  const statusModel = document.getElementById('modelStatus');
+  const fpsEl = document.getElementById('fps');
+  const objCount = document.getElementById('objCount');
+  const backendLabel = document.getElementById('backend');
+  const legend = document.getElementById('legend');
 
-async function setupCamera() {
-  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-  video.srcObject = stream;
-  await new Promise(r => video.onloadedmetadata = r);
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-}
+  let tfliteModel = null;
+  let stream = null;
+  let rafId = null;
+  let lastTime = performance.now();
+  let frames = 0;
 
-async function loadModel() {
-  session = await ort.InferenceSession.create(MODEL_URL, { executionProviders: ["wasm"] });
-  loading.textContent = "Model loaded ✔";
-}
-
-function preprocess() {
-  const w = 640, h = 640;
-  const tmp = document.createElement("canvas");
-  tmp.width = w; tmp.height = h;
-  const tctx = tmp.getContext("2d");
-  tctx.drawImage(video, 0, 0, w, h);
-  const imgData = tctx.getImageData(0, 0, w, h);
-
-  const data = new Float32Array(w * h * 3);
-  for (let i = 0; i < w * h; i++) {
-    data[i] = imgData.data[i * 4] / 255;
-    data[i + w * h] = imgData.data[i * 4 + 1] / 255;
-    data[i + 2 * w * h] = imgData.data[i * 4 + 2] / 255;
+  // A simple colors map for classes (we'll generate on the fly)
+  function colorForClass(i){
+    const hues = [200, 160, 120, 60, 320, 0, 30, 280, 20, 40];
+    const h = hues[i % hues.length];
+    return `hsl(${h} 85% 55%)`;
   }
 
-  return new ort.Tensor("float32", data, [1, 3, h, w]);
-}
-
-function drawBox(x, y, w, h, label) {
-  ctx.strokeStyle = "#00ccff";
-  ctx.lineWidth = 3;
-  ctx.strokeRect(x, y, w, h);
-
-  ctx.fillStyle = "#00ccff";
-  ctx.font = "18px Segoe UI";
-  const tw = ctx.measureText(label).width + 10;
-  ctx.fillRect(x, y - 25, tw, 25);
-
-  ctx.fillStyle = "black";
-  ctx.fillText(label, x + 5, y - 7);
-}
-
-async function run() {
-  const input = preprocess();
-  const output = await session.run({ images: input });
-
-  // YOLOv8 output is: (1, 84, 8400)
-  const data = output.output0.data;
-
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  const confThr = parseFloat(thr.value);
-  tval.textContent = confThr;
-
-  for (let i = 0; i < 8400; i++) {
-    const clsScores = data.slice(i * 84 + 4, i * 84 + 84);
-    const conf = Math.max(...clsScores);
-    const cls = clsScores.indexOf(conf);
-
-    if (conf < confThr) continue;
-
-    const bx = data[i * 84 + 0];
-    const by = data[i * 84 + 1];
-    const bw = data[i * 84 + 2];
-    const bh = data[i * 84 + 3];
-
-    const x = (bx - bw/2) / 640 * canvas.width;
-    const y = (by - bh/2) / 640 * canvas.height;
-    const w = bw / 640 * canvas.width;
-    const h = bh / 640 * canvas.height;
-
-    drawBox(x, y, w, h, `${cls} ${(conf*100).toFixed(1)}%`);
+  // Setup video (camera)
+  async function startCamera(){
+    try{
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio:false });
+      video.srcObject = stream;
+      await video.play();
+      resizeCanvas();
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      runLoop();
+    }catch(e){
+      alert('Gagal akses kamera: ' + e.message);
+      console.error(e);
+    }
   }
 
-  requestAnimationFrame(run);
-}
+  function stopCamera(){
+    if(stream){
+      stream.getTracks().forEach(t => t.stop());
+    }
+    stream = null;
+    video.pause();
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+    if(rafId) cancelAnimationFrame(rafId);
+    ctx.clearRect(0,0,overlay.width,overlay.height);
+  }
 
-(async () => {
-  await setupCamera();
-  await loadModel();
-  run();
-})();
-</script>
+  function resizeCanvas(){
+    overlay.width = video.videoWidth || video.clientWidth;
+    overlay.height = video.videoHeight || video.clientHeight;
+  }
 
-</body>
-</html>
+  // Load TFLite model (path must be reachable by browser)
+  async function loadTFLiteModel(url){
+    statusModel.innerHTML = 'Model: <span class="muted">memuat...</span>';
+    try{
+      // Set TF backend choice (webgl or wasm)
+      const chosen = backendSelect.value;
+      if(chosen === 'webgl'){
+        await tf.setBackend('webgl');
+      } else {
+        await tf.setBackend('wasm');
+      }
+      backendLabel.textContent = tf.getBackend();
+
+      // load .tflite model via tf.tflite (API from tfjs-tflite)
+      tfliteModel = await tflite.loadTFLiteModel(url);
+      statusModel.innerHTML = 'Model: <span style="color:var(--accent)">siap</span>';
+      // optional: build legend from model metadata? we generically show common COCO labels if available below
+      populateLegend();
+    }catch(e){
+      console.error('load model err', e);
+      statusModel.innerHTML = 'Model: <span class="muted">gagal memuat — lihat console</span>';
+      alert('Gagal memuat model. Pastikan path benar dan jalankan lewat server (http).');
+    }
+  }
+
+  // Warm up model with a dummy tensor (faster subsequent inference)
+  async function warmupModel(){
+    if(!tfliteModel) return alert('Model be
