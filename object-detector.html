@@ -209,4 +209,337 @@
 
   // Warm up model with a dummy tensor (faster subsequent inference)
   async function warmupModel(){
-    if(!tfliteModel) return alert('Model be
+    if(!tfliteModel) return alert('Model belum dimuat.');
+    statusModel.innerHTML = 'Model: warming up...';
+    try{
+      // create dummy input (use fromPixels) sized to model input (we detect shape automatically below)
+      // many TFLite detection models use input shape [1,h,w,3] e.g. 320 or 512.
+      // We'll use a small canvas to create a tensor from pixels.
+      const w = 320, h = 320;
+      const tmp = document.createElement('canvas'); tmp.width = w; tmp.height = h;
+      const tctx = tmp.getContext('2d'); tctx.fillStyle='#777'; tctx.fillRect(0,0,w,h);
+      const img = tf.browser.fromPixels(tmp).expandDims(0).toFloat().div(255);
+      // call predict (tfliteModel.predict returns tensors or arrays depending on model)
+      try{
+        const out = await tfliteModel.predict(img);
+        // dispose outputs if tf.Tensors
+        if(Array.isArray(out)){
+          out.forEach(t => tf.dispose(t));
+        } else if(out && typeof out.dispose === 'function'){
+          out.dispose();
+        }
+      }catch(e){
+        console.warn('warmup predict err', e);
+      } finally {
+        img.dispose();
+      }
+      statusModel.innerHTML = 'Model: warmed up ✔';
+    }catch(e){
+      console.error(e);
+      statusModel.innerHTML = 'Model: warmup gagal';
+    }
+  }
+
+  // Try to be flexible parsing outputs:
+  // Many TFLite detection models return multiple outputs:
+  // - boxes (shape [1,num,4]) or flattened
+  // - classes (shape [1,num])
+  // - scores (shape [1,num])
+  // - num (shape [1])
+  // We'll inspect output tensors and route accordingly.
+  function parseDetections(output, maxDet){
+    // output may be a dict-like object with tensors or an array.
+    // Normalize to an object with names -> typed arrays
+    const outs = {};
+    if(output == null) return [];
+    // If output is a map-like, copy keys:
+    if(typeof output === 'object' && !Array.isArray(output) && !(output.dataSync)){
+      for(const k of Object.keys(output)){
+        const t = output[k];
+        outs[k] = (t.dataSync ? t.dataSync() : t);
+      }
+    } else if(Array.isArray(output)){
+      // If it's an array, we don't have names. Heuristic:
+      // common ordering: boxes, classes, scores, num
+      for(let i=0;i<output.length;i++){
+        const t = output[i];
+        outs['o'+i] = (t.dataSync ? t.dataSync() : t);
+      }
+    } else if(output.dataSync){
+      outs['o0'] = output.dataSync();
+    }
+
+    // Heuristic detection:
+    // find arrays that look like boxes (len multiple of 4), scores (<=1), classes (small ints)
+    const arrays = Object.values(outs);
+    const names = Object.keys(outs);
+
+    let boxes=null, scores=null, classes=null, num=null;
+
+    // Try named keys first
+    for(const k of names){
+      const arr = outs[k];
+      if(k.toLowerCase().includes('box') && arr.length >= 4) boxes = arr;
+      if(k.toLowerCase().includes('score') && arr.length >= 1) scores = arr;
+      if(k.toLowerCase().includes('class') && arr.length >= 1) classes = arr;
+      if(k.toLowerCase().includes('num')) num = arr;
+    }
+
+    // Fallback heuristics
+    if(!boxes){
+      // pick the longest that is multiple of 4
+      for(const arr of arrays){
+        if(arr.length >= 4 && (arr.length % 4) === 0 && arr.length/4 <= 200){
+          boxes = arr; break;
+        }
+      }
+    }
+    if(!scores){
+      // pick array with values in [0,1] or decimals
+      for(const arr of arrays){
+        if(arr === boxes) continue;
+        const max = Math.max(...arr);
+        const min = Math.min(...arr);
+        if(max <= 1.01 && min >= -0.01 && arr.length > 0){ scores = arr; break; }
+      }
+    }
+    if(!classes){
+      // pick array with small integer values
+      for(const arr of arrays){
+        if(arr === boxes || arr === scores) continue;
+        const max = Math.max(...arr);
+        if(max < 500 && arr.length > 0){ classes = arr; break; }
+      }
+    }
+    if(!num){
+      for(const arr of arrays){
+        if(arr.length === 1 && Number.isInteger(arr[0])) num = arr;
+      }
+    }
+
+    // Now construct result list
+    const results = [];
+    if(!boxes || !scores) return results;
+
+    // if boxes is flattened [N*4] -> convert to Nx4
+    let n = Math.floor(boxes.length / 4);
+    if(num && num.length>0) n = Math.min(n, Math.floor(num[0]));
+    n = Math.min(n, maxDet || 100);
+
+    for(let i=0;i<n;i++){
+      const bx = boxes[i*4 + 0];
+      const by = boxes[i*4 + 1];
+      const bw = boxes[i*4 + 2];
+      const bh = boxes[i*4 + 3];
+      const sc = scores[i] ?? (scores[i*1] || 0);
+      const cls = classes ? classes[i] : 0;
+      results.push({bx,by,bw,bh,score:sc,class:Math.round(cls)});
+    }
+
+    return results;
+  }
+
+  // Draw detections (EfficientDet-lite box format might be [ymin,xmin,ymax,xmax] or [x,y,w,h] depending on model.
+  // We'll try both heuristics: if values in [0,1] treat as normalized; detect pattern by checking ranges.
+  function drawDetections(dets){
+    ctx.clearRect(0,0,overlay.width,overlay.height);
+    const thr = parseFloat(thresholdEl.value);
+    let count = 0;
+    dets.forEach((d, idx) => {
+      if(d.score < thr) return;
+      // determine if normalized (0..1) or absolute
+      const isNormalized = (d.bx <= 1.01 && d.by <= 1.01 && d.bw <= 1.01 && d.bh <= 1.01);
+      let x,y,w,h;
+      if(isNormalized){
+        // Could be [cx,cy,w,h] OR [xmin,ymin,xmax,ymax] OR [ymin,xmin,ymax,xmax]
+        // Try interpret as [cx,cy,w,h] if center coords make sense (bw small)
+        if(d.bw <= 1 && d.bh <= 1 && Math.abs(d.bx) <= 1 && Math.abs(d.by) <= 1){
+          // assume center format
+          x = (d.bx - d.bw/2) * overlay.width;
+          y = (d.by - d.bh/2) * overlay.height;
+          w = d.bw * overlay.width;
+          h = d.bh * overlay.height;
+        } else {
+          // fallback assume [ymin,xmin,ymax,xmax]
+          const ymin = d.bx, xmin = d.by, ymax = d.bw, xmax = d.bh;
+          x = xmin * overlay.width;
+          y = ymin * overlay.height;
+          w = (xmax - xmin) * overlay.width;
+          h = (ymax - ymin) * overlay.height;
+        }
+      } else {
+        // absolute values: could be [x,y,w,h] or [xmin,ymin,xmax,ymax]
+        // heuristics: if values > overlay width -> maybe [xmin,ymin,xmax,ymax]
+        if(d.bw > overlay.width || d.bh > overlay.height){
+          // assume [xmin,ymin,xmax,ymax]
+          const xmin = d.bx, ymin = d.by, xmax = d.bw, ymax = d.bh;
+          x = xmin; y = ymin; w = xmax - xmin; h = ymax - ymin;
+        } else {
+          x = d.bx; y = d.by; w = d.bw; h = d.bh;
+        }
+      }
+
+      // clip
+      x = Math.max(0, x); y = Math.max(0,y); w = Math.min(overlay.width - x, w); h = Math.min(overlay.height - y, h);
+
+      const clsId = d.class;
+      const col = colorForClass(clsId);
+      // box
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = col;
+      ctx.strokeRect(x, y, w, h);
+      // label bg
+      const label = `Class ${clsId} ${(d.score*100).toFixed(1)}%`;
+      ctx.fillStyle = col;
+      ctx.font = '16px Inter, Arial';
+      const tw = ctx.measureText(label).width + 8;
+      ctx.fillRect(x, y - 24, tw, 22);
+      ctx.fillStyle = '#061119';
+      ctx.fillText(label, x + 6, y - 6);
+
+      count++;
+    });
+    objCount.textContent = count;
+  }
+
+  // The main loop: grab frame, run predict, parse and draw
+  async function runLoop(){
+    if(!tfliteModel) {
+      rafId = requestAnimationFrame(runLoop);
+      return;
+    }
+    if(video.readyState < 2){
+      rafId = requestAnimationFrame(runLoop);
+      return;
+    }
+    // measure FPS
+    const now = performance.now();
+    frames++;
+    if(now - lastTime >= 1000){
+      fpsEl.textContent = frames;
+      frames = 0;
+      lastTime = now;
+    }
+
+    resizeCanvas();
+    try{
+      // capture frame into tf tensor
+      const inputTensor = tf.tidy(()=>{
+        let t = tf.browser.fromPixels(video).toFloat(); // [h,w,3]
+        // many tflite detection models expect fixed size e.g. 320x320
+        // We will resize to 320x320 (common for EfficientDet-Lite0)
+        const target = 320;
+        t = tf.image.resizeBilinear(t, [target, target]);
+        // normalize to [0,1]
+        t = t.div(255.0);
+        // expand dims: [1,h,w,3]
+        t = t.expandDims(0);
+        return t;
+      });
+
+      // Predict: tfliteModel.predict returns Tensors or array-like (depends on binding)
+      const output = await tfliteModel.predict(inputTensor);
+
+      // Parse outputs / heuristic
+      const dets = parseDetections(output, parseInt(maxDetEl.value || 50));
+      drawDetections(dets);
+
+      // dispose outputs if they are tensors (tflite lib may return plain arrays; if tensors, dispose)
+      if(output && typeof output.forEach === 'function'){
+        output.forEach(t => { if(t && t.dispose) t.dispose(); });
+      } else if(output && output.dispose){
+        output.dispose();
+      }
+
+      inputTensor.dispose();
+    }catch(e){
+      console.warn('inference error', e);
+    }
+    rafId = requestAnimationFrame(runLoop);
+  }
+
+  // UI wiring
+  startBtn.addEventListener('click', startCamera);
+  stopBtn.addEventListener('click', stopCamera);
+  snapshotBtn.addEventListener('click', ()=>{
+    const tmp = document.createElement('canvas');
+    tmp.width = overlay.width; tmp.height = overlay.height;
+    const tctx = tmp.getContext('2d');
+    tctx.drawImage(video, 0, 0, tmp.width, tmp.height);
+    tctx.drawImage(overlay, 0, 0);
+    const a = document.createElement('a');
+    a.href = tmp.toDataURL('image/png');
+    a.download = 'snapshot.png';
+    a.click();
+  });
+
+  fileIn.addEventListener('change', async (ev)=>{
+    const f = ev.target.files[0];
+    if(!f) return;
+    stopCamera();
+    const url = URL.createObjectURL(f);
+    if(f.type.startsWith('image/')){
+      // show image
+      const img = new Image();
+      img.onload = () => {
+        overlay.width = img.width; overlay.height = img.height;
+        const c=overlay.getContext('2d'); c.clearRect(0,0,overlay.width,overlay.height);
+        c.drawImage(img,0,0);
+      };
+      img.src = url;
+    } else if(f.type.startsWith('video/')){
+      video.srcObject = null;
+      video.src = url;
+      await video.play();
+      runLoop();
+    }
+  });
+
+  loadBtn.addEventListener('click', async ()=>{
+    const url = modelUrlInput.value.trim();
+    if(!url) return alert('Masukkan path model .tflite');
+    await loadTFLiteModel(url);
+  });
+
+  warmupBtn.addEventListener('click', warmupModel);
+
+  // generate legend sample (we don't have class names embedded reliably, so show some sample common classes)
+  function populateLegend(){
+    legend.innerHTML = '';
+    const sample = ['person','bicycle','car','chair','laptop','mouse','keyboard','bottle','cup','book'];
+    sample.forEach((s,i)=>{
+      const el = document.createElement('div'); el.className='item';
+      const dot = document.createElement('div'); dot.style.width='12px'; dot.style.height='12px';
+      dot.style.borderRadius='50%'; dot.style.background = colorForClass(i);
+      dot.style.boxShadow = '0 2px 8px rgba(0,0,0,0.6)';
+      el.appendChild(dot);
+      const t = document.createElement('div'); t.textContent = s; t.style.marginLeft='6px';
+      el.appendChild(t);
+      legend.appendChild(el);
+    });
+  }
+
+  // On load: set default backend to webgl if available
+  (async ()=>{
+    // prefer webgl if possible
+    if(tf.backend().isBackendRegistered && tf.engine().registry['webgl']) {
+      try{ await tf.setBackend('webgl'); backendLabel.textContent = tf.getBackend(); }catch(e){}
+    }
+    populateLegend();
+    // set default model path value remains ./efficientdet_lite0.tflite
+  })();
+
+  // Helpful: prevent page from sleeping on mobile while app running (optional)
+  if('wakeLock' in navigator){
+    let wakelock = null;
+    window.addEventListener('visibilitychange', async () => {
+      if(document.visibilityState === 'visible' && stream){
+        try{ wakelock = await navigator.wakeLock.request('screen'); }catch(e){}
+      } else {
+        if(wakelock){ wakelock.release(); wakelock = null; }
+      }
+    });
+  }
+  </script>
+</body>
+</html>
