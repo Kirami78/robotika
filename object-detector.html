@@ -1,116 +1,176 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Deteksi Objek + Warna + Jarak</title>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
-    <style>
-        body {
-            background: #0d1117;
-            color: #fff;
-            font-family: Arial, sans-serif;
-            text-align: center;
-            padding: 20px;
-        }
-        video, canvas {
-            border-radius: 12px;
-            margin-top: 20px;
-        }
-        #container {
-            display: flex;
-            justify-content: center;
-            gap: 20px;
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Deteksi Objek, Warna & Jarak (TensorFlow)</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #0d0d0d;
+      color: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      height: 100vh;
+    }
+    h1 {
+      margin-top: 20px;
+      font-size: 26px;
+      font-weight: bold;
+      color: #00c3ff;
+      text-shadow: 0 0 10px #00c3ff;
+    }
+    #wrapper {
+      position: relative;
+      width: 640px;
+      height: 480px;
+      margin-top: 20px;
+      border: 3px solid #00c3ff;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 0 25px #00c3ff;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1); /* Mirror biar natural */
+    }
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+    .infoBox {
+      margin-top: 20px;
+      padding: 15px;
+      background: #111;
+      border: 2px solid #00c3ff;
+      border-radius: 10px;
+      width: 350px;
+      text-align: left;
+      box-shadow: 0 0 20px #00c3ff;
+    }
+    .label {
+      font-size: 18px;
+      font-weight: bold;
+      margin-bottom: 8px;
+      color: #00eaff;
+    }
+  </style>
 </head>
 <body>
-    <h1>Deteksi Objek + Warna + Estimasi Jarak</h1>
-    <p>Kamera harus diaktifkan. Jika tidak muncul, periksa izin kamera.</p>
+  <h1>Deteksi Objek + Warna + Jarak</h1>
 
-    <div id="container">
-        <video id="video" width="500" height="375" autoplay playsinline></video>
-        <canvas id="canvas" width="500" height="375"></canvas>
-    </div>
+  <div id="wrapper">
+    <video id="camera" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+  </div>
 
-    <script>
-        const video = document.getElementById('video');
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
-        let model;
+  <div class="infoBox">
+    <div class="label">Info Objekt:</div>
+    <div id="objek">Objek: -</div>
+    <div id="warna">Warna: -</div>
+    <div id="jarak">Jarak: -</div>
+  </div>
 
-        async function initCamera() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-                video.srcObject = stream;
-                return new Promise(resolve => video.onloadedmetadata = resolve);
-            } catch (error) {
-                alert('Gagal membuka kamera. Izinkan akses kamera.');
-            }
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+
+  <script>
+    const video = document.getElementById("camera");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+
+    const objekBox = document.getElementById("objek");
+    const warnaBox = document.getElementById("warna");
+    const jarakBox = document.getElementById("jarak");
+
+    const colorNames = [
+      { name: "Merah", r: 200, g: 50, b: 50 },
+      { name: "Hijau", r: 50, g: 200, b: 50 },
+      { name: "Biru", r: 50, g: 50, b: 200 },
+      { name: "Kuning", r: 230, g: 230, b: 50 },
+      { name: "Oren", r: 255, g: 140, b: 50 },
+      { name: "Ungu", r: 150, g: 70, b: 200 },
+      { name: "Hitam", r: 20, g: 20, b: 20 },
+      { name: "Putih", r: 230, g: 230, b: 230 }
+    ];
+
+    function getColorName(r, g, b) {
+      let closest = null;
+      let minDist = 999999;
+      colorNames.forEach(c => {
+        const dist = Math.sqrt((r - c.r)**2 + (g - c.g)**2 + (b - c.b)**2);
+        if (dist < minDist) {
+          minDist = dist;
+          closest = c.name;
+        }
+      });
+      return closest;
+    }
+
+    function estimateDistance(boxWidthPx) {
+      const knownWidth = 20; // cm, estimasi rata-rata objek
+      const focalLength = 650;
+      return Math.round((knownWidth * focalLength) / boxWidthPx);
+    }
+
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+        };
+      } catch (err) {
+        alert("Gagal membuka kamera: " + err);
+      }
+    }
+
+    async function runDetection() {
+      const model = await cocoSsd.load();
+
+      async function detect() {
+        const predictions = await model.detect(video);
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "#00eaff";
+        ctx.font = "18px Arial";
+
+        if (predictions.length > 0) {
+          const p = predictions[0];
+
+          const [x, y, w, h] = p.bbox;
+
+          ctx.strokeRect(x, y, w, h);
+          ctx.fillStyle = "#00eaff";
+          ctx.fillText(p.class, x, y - 5);
+
+          const frame = ctx.getImageData(x + w / 2, y + h / 2, 1, 1);
+          const [r, g, b] = frame.data;
+          const colorName = getColorName(r, g, b);
+
+          objekBox.innerText = "Objek: " + p.class;
+          warnaBox.innerText = "Warna: " + colorName;
+
+          const jarak = estimateDistance(w);
+          jarakBox.innerText = "Jarak: " + jarak + " cm";
         }
 
-        function detectDominantColor(imageData) {
-            let r = 0, g = 0, b = 0;
-            const data = imageData.data;
-            const length = data.length / 4;
+        requestAnimationFrame(detect);
+      }
 
-            for (let i = 0; i < data.length; i += 4) {
-                r += data[i];
-                g += data[i + 1];
-                b += data[i + 2];
-            }
+      detect();
+    }
 
-            r = Math.round(r / length);
-            g = Math.round(g / length);
-            b = Math.round(b / length);
-
-            return `rgb(${r}, ${g}, ${b})`;
-        }
-
-        function estimateDistance(bboxHeight) {
-            const knownObjectHeight = 0.15; // 15 cm (contoh)
-            const focalLength = 500;        // nilai asumsi
-            return (knownObjectHeight * focalLength) / (bboxHeight * 0.0026);
-        }
-
-        async function startDetection() {
-            model = await cocoSsd.load();
-
-            async function detect() {
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-                const predictions = await model.detect(video);
-
-                predictions.forEach(pred => {
-                    const [x, y, width, height] = pred.bbox;
-
-                    const imageData = ctx.getImageData(x, y, width, height);
-                    const color = detectDominantColor(imageData);
-
-                    const distance = estimateDistance(height).toFixed(2);
-
-                    ctx.strokeStyle = 'lime';
-                    ctx.lineWidth = 3;
-                    ctx.strokeRect(x, y, width, height);
-
-                    ctx.fillStyle = 'lime';
-                    ctx.font = '16px Arial';
-                    ctx.fillText(`${pred.class}`, x, y - 25);
-                    ctx.fillText(`Warna: ${color}`, x, y - 10);
-                    ctx.fillText(`Jarak: ${distance} m`, x, y + height + 20);
-                });
-
-                requestAnimationFrame(detect);
-            }
-
-            detect();
-        }
-
-        (async () => {
-            await initCamera();
-            await startDetection();
-        })();
-    </script>
+    startCamera();
+    runDetection();
+  </script>
 </body>
 </html>
