@@ -1,267 +1,170 @@
-<!doctype html>
-<html lang="id">
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Object Detector — FINAL NON-MIRROR</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YOLOv8 Web Object Detector</title>
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
 
   <style>
-    body { font-family: Arial, sans-serif; margin: 12px; background:#f2f4f8; }
-    h1 { margin-bottom: 8px; font-size: 20px; }
-    #controls { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
-    select, button, input {
-      padding:8px 10px;
-      border:1px solid #ccc;
-      border-radius:8px;
-      background:white;
+    body {
+      margin: 0;
+      background: #0d1117;
+      color: white;
+      font-family: "Segoe UI", sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
     }
-    #videoContainer {
-      position:relative;
-      width:100%;
-      max-width:900px;
-      background:#000;
-      border-radius:10px;
-      overflow:hidden;
+
+    h2 {
+      margin-top: 20px;
+      font-weight: 600;
     }
-    video {
-      width:100%;
-      display:block;
-      height:auto;
-      /* TIDAK ADA MIRROR */
-      transform: none;
+
+    #container {
+      position: relative;
+      width: 80vw;
+      max-width: 700px;
     }
-    canvas {
-      position:absolute;
-      top:0;
-      left:0;
-      pointer-events:none;
-      transform: none;
+
+    video, canvas {
+      width: 100%;
+      border-radius: 12px;
     }
-    #log {
-      margin-top:10px;
-      padding:8px;
-      background:white;
-      border-radius:8px;
-      border:1px solid #ddd;
-      white-space:pre-wrap;
+
+    #panel {
+      margin-top: 20px;
+      background: rgba(255, 255, 255, 0.08);
+      padding: 15px 20px;
+      border-radius: 12px;
+      width: 80vw;
+      max-width: 700px;
+    }
+
+    #panel input {
+      width: 100%;
+    }
+
+    #loading {
+      margin-top: 20px;
+      color: #58a6ff;
+      font-size: 18px;
     }
   </style>
 </head>
 <body>
 
-<h1>Object Detector — FINAL NON-MIRROR FIX</h1>
+  <h2>YOLOv8 Web Object Detector</h2>
+  <div id="loading">Loading model... please wait</div>
 
-<div id="controls">
-  <label>Kamera:
-    <select id="cameraSelect"></select>
-  </label>
+  <div id="container">
+    <video id="cam" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+  </div>
 
-  <button id="startBtn">Start</button>
-  <button id="stopBtn" disabled>Stop</button>
-
-  <label>Threshold:
-    <input id="threshold" type="range" min="0" max="1" step="0.01" value="0.5">
-    <span id="thVal">0.50</span>
-  </label>
-
-  <button id="snapBtn">Snapshot</button>
-  <input id="fileInput" type="file" accept="image/*,video/*">
-</div>
-
-<div id="videoContainer">
-  <video id="video" autoplay playsinline muted></video>
-  <canvas id="overlay"></canvas>
-</div>
-
-<div id="log">Status: memuat model...</div>
-
-<!-- TensorFlow.js -->
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
-<!-- COCO-SSD -->
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+  <div id="panel">
+    <label>Confidence Threshold: <span id="tval">0.3</span></label>
+    <input type="range" id="thr" min="0.1" max="0.9" value="0.3" step="0.01" />
+  </div>
 
 <script>
+const video = document.getElementById("cam");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const thr = document.getElementById("thr");
+const tval = document.getElementById("tval");
+const loading = document.getElementById("loading");
+
+let session;
+
+// Replace this with your model URL
+const MODEL_URL = "yolov8n.onnx"; // <-- place file in same folder
+
+async function setupCamera() {
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+  video.srcObject = stream;
+  await new Promise(r => video.onloadedmetadata = r);
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+}
+
+async function loadModel() {
+  session = await ort.InferenceSession.create(MODEL_URL, { executionProviders: ["wasm"] });
+  loading.textContent = "Model loaded ✔";
+}
+
+function preprocess() {
+  const w = 640, h = 640;
+  const tmp = document.createElement("canvas");
+  tmp.width = w; tmp.height = h;
+  const tctx = tmp.getContext("2d");
+  tctx.drawImage(video, 0, 0, w, h);
+  const imgData = tctx.getImageData(0, 0, w, h);
+
+  const data = new Float32Array(w * h * 3);
+  for (let i = 0; i < w * h; i++) {
+    data[i] = imgData.data[i * 4] / 255;
+    data[i + w * h] = imgData.data[i * 4 + 1] / 255;
+    data[i + 2 * w * h] = imgData.data[i * 4 + 2] / 255;
+  }
+
+  return new ort.Tensor("float32", data, [1, 3, h, w]);
+}
+
+function drawBox(x, y, w, h, label) {
+  ctx.strokeStyle = "#00ccff";
+  ctx.lineWidth = 3;
+  ctx.strokeRect(x, y, w, h);
+
+  ctx.fillStyle = "#00ccff";
+  ctx.font = "18px Segoe UI";
+  const tw = ctx.measureText(label).width + 10;
+  ctx.fillRect(x, y - 25, tw, 25);
+
+  ctx.fillStyle = "black";
+  ctx.fillText(label, x + 5, y - 7);
+}
+
+async function run() {
+  const input = preprocess();
+  const output = await session.run({ images: input });
+
+  // YOLOv8 output is: (1, 84, 8400)
+  const data = output.output0.data;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const confThr = parseFloat(thr.value);
+  tval.textContent = confThr;
+
+  for (let i = 0; i < 8400; i++) {
+    const clsScores = data.slice(i * 84 + 4, i * 84 + 84);
+    const conf = Math.max(...clsScores);
+    const cls = clsScores.indexOf(conf);
+
+    if (conf < confThr) continue;
+
+    const bx = data[i * 84 + 0];
+    const by = data[i * 84 + 1];
+    const bw = data[i * 84 + 2];
+    const bh = data[i * 84 + 3];
+
+    const x = (bx - bw/2) / 640 * canvas.width;
+    const y = (by - bh/2) / 640 * canvas.height;
+    const w = bw / 640 * canvas.width;
+    const h = bh / 640 * canvas.height;
+
+    drawBox(x, y, w, h, `${cls} ${(conf*100).toFixed(1)}%`);
+  }
+
+  requestAnimationFrame(run);
+}
+
 (async () => {
-  const video = document.getElementById("video");
-  const overlay = document.getElementById("overlay");
-  const ctx = overlay.getContext("2d");
-
-  const cameraSelect = document.getElementById("cameraSelect");
-  const startBtn = document.getElementById("startBtn");
-  const stopBtn = document.getElementById("stopBtn");
-  const log = document.getElementById("log");
-
-  const fileInput = document.getElementById("fileInput");
-  const snapBtn = document.getElementById("snapBtn");
-
-  const thresholdRange = document.getElementById("threshold");
-  const thVal = document.getElementById("thVal");
-
-  let stream = null;
-  let running = false;
-  let detectLoopId = null;
-  let model = null;
-
-  thVal.textContent = parseFloat(thresholdRange.value).toFixed(2);
-  thresholdRange.addEventListener("input", () => {
-    thVal.textContent = parseFloat(thresholdRange.value).toFixed(2);
-  });
-
-  log.textContent = "Status: memuat model COCO-SSD...";
-  model = await cocoSsd.load();
-  log.textContent = "Model siap — klik Start.";
-
-  async function updateCameras() {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    const cams = devices.filter(d => d.kind === "videoinput");
-
-    cameraSelect.innerHTML = "";
-    cams.forEach((c, i) => {
-      const opt = document.createElement("option");
-      opt.value = c.deviceId;
-      opt.text = c.label || `Camera ${i + 1}`;
-      cameraSelect.appendChild(opt);
-    });
-  }
-  await updateCameras();
-
-  async function startCamera() {
-    if (stream) stopCamera();
-
-    const deviceId = cameraSelect.value || undefined;
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { 
-        deviceId: deviceId ? { exact: deviceId } : undefined,
-        facingMode: "environment" 
-      }
-    });
-
-    video.srcObject = stream;
-    await video.play();
-
-    resizeCanvas();
-    running = true;
-    detectLoop();
-    startBtn.disabled = true;
-    stopBtn.disabled = false;
-
-    log.textContent = "Kamera aktif. Mendeteksi objek...";
-  }
-
-  function stopCamera() {
-    if (stream) {
-      stream.getTracks().forEach(t => t.stop());
-    }
-    stream = null;
-    running = false;
-    cancelAnimationFrame(detectLoopId);
-    ctx.clearRect(0,0,overlay.width,overlay.height);
-
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
-
-    log.textContent = "Kamera dihentikan.";
-  }
-
-  function resizeCanvas() {
-    overlay.width = video.videoWidth;
-    overlay.height = video.videoHeight;
-  }
-
-  async function detectLoop() {
-    if (!running) return;
-
-    if (video.readyState >= 2) {
-      const predictions = await model.detect(video);
-      draw(predictions);
-    }
-
-    detectLoopId = requestAnimationFrame(detectLoop);
-  }
-
-  // === FIX FINAL: bounding box & label tidak mirror ===
-  function draw(pred) {
-    resizeCanvas();
-    ctx.clearRect(0,0,overlay.width,overlay.height);
-
-    const thr = parseFloat(thresholdRange.value);
-
-    pred.forEach(p => {
-      if (p.score < thr) return;
-
-      const [x,y,w,h] = p.bbox;
-
-      // Flip X agar sesuai tampilan video (anti mirror)
-      const flipX = overlay.width - x - w;
-
-      ctx.strokeStyle = "rgba(0,150,255,0.9)";
-      ctx.lineWidth = 3;
-      ctx.strokeRect(flipX, y, w, h);
-
-      ctx.font = "18px Arial";
-      ctx.fillStyle = "rgba(0,150,255,0.8)";
-      const text = `${p.class} ${(p.score*100).toFixed(1)}%`;
-      ctx.fillRect(flipX, y - 20, ctx.measureText(text).width + 10, 20);
-
-      ctx.fillStyle = "white";
-      ctx.fillText(text, flipX + 5, y - 5);
-    });
-
-    log.textContent = `Mendeteksi... (${pred.length} objek)`;
-  }
-
-  snapBtn.addEventListener("click", () => {
-    const tmp = document.createElement("canvas");
-    tmp.width = overlay.width;
-    tmp.height = overlay.height;
-
-    const tctx = tmp.getContext("2d");
-
-    // NON-MIRROR snapshot
-    tctx.drawImage(video, 0, 0);
-    tctx.drawImage(overlay, 0, 0);
-
-    const url = tmp.toDataURL("image/png");
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "snapshot.png";
-    a.click();
-  });
-
-  fileInput.addEventListener("change", async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    stopCamera();
-    const url = URL.createObjectURL(file);
-
-    if (file.type.startsWith("image/")) {
-      const img = new Image();
-      img.onload = async () => {
-        overlay.width = img.width;
-        overlay.height = img.height;
-
-        ctx.drawImage(img, 0, 0);
-
-        const pred = await model.detect(img);
-        draw(pred);
-
-        log.textContent = `${pred.length} objek terdeteksi pada gambar.`;
-      };
-      img.src = url;
-    } else if (file.type.startsWith("video/")) {
-      video.src = url;
-      await video.play();
-
-      running = true;
-      detectLoop();
-      log.textContent = "Mendeteksi objek di dalam video...";
-    }
-  });
-
-  startBtn.addEventListener("click", startCamera);
-  stopBtn.addEventListener("click", stopCamera);
-  cameraSelect.addEventListener("change", startCamera);
+  await setupCamera();
+  await loadModel();
+  run();
 })();
 </script>
 
