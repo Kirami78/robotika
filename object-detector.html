@@ -1,330 +1,138 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="id">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Deteksi Objek • Warna Nama • Estimasi Jarak (FIXED)</title>
+<meta charset="UTF-8">
+<title>Deteksi Objek + Warna + Jarak</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+
 <style>
-  :root{ --accent:#00d1ff; --bg:#071019; --card:#0b1620; --muted:#98aab8; }
-  html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg),#021018);color:#e8f6ff;font-family:Inter, Arial, sans-serif;}
-  .wrap{max-width:980px;margin:18px auto;padding:18px;display:grid;grid-template-columns:640px 1fr; gap:18px;align-items:start;}
-  h1{margin:0 0 8px 0;color:var(--accent);text-shadow:0 6px 30px rgba(0,200,255,0.06);}
-  .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border-radius:12px;padding:12px;border:1px solid rgba(255,255,255,0.03);box-shadow:0 8px 30px rgba(0,0,0,0.6);}
-  #viewport{position:relative;width:640px;height:480px;border-radius:10px;overflow:hidden;border:2px solid rgba(0,200,255,0.08);}
-  video{width:100%;height:100%;object-fit:cover;display:block; /* NO MIRROR */ }
-  canvas{position:absolute;left:0;top:0;pointer-events:none;}
-  .info{padding:10px;}
-  .label{font-weight:700;color:var(--accent);}
-  .muted{color:var(--muted);font-size:13px}
-  .stat{display:flex;gap:8px;flex-direction:column;}
-  .btn{appearance:none;border:0;padding:8px 10px;border-radius:8px;background:var(--accent);color:#012;font-weight:700;cursor:pointer}
-  .small{font-size:13px;color:var(--muted)}
-  pre{white-space:pre-wrap;margin:6px 0;color:#cfefff;background:rgba(0,0,0,0.08);padding:8px;border-radius:6px}
+    body {
+        margin: 0;
+        background: #101010;
+        color: white;
+        font-family: Arial;
+        text-align: center;
+    }
+    #container {
+        margin-top: 20px;
+        position: relative;
+        display: inline-block;
+    }
+    video, canvas {
+        border-radius: 10px;
+        box-shadow: 0 0 20px #00ffcc55;
+    }
 </style>
 </head>
+
 <body>
-<div class="wrap">
-  <div>
-    <h1>Deteksi Objek • Warna Nama • Estimasi Jarak</h1>
-    <div class="card" id="viewerCard">
-      <div id="viewport">
-        <video id="video" autoplay playsinline muted></video>
-        <canvas id="overlay"></canvas>
-      </div>
+<h1>🔥 Deteksi Objek • Warna • Jarak</h1>
 
-      <div style="display:flex;gap:8px;margin-top:10px;">
-        <button id="btnStart" class="btn">Mulai Kamera</button>
-        <button id="btnStop" class="btn" disabled>Hentikan</button>
-        <button id="btnSnapshot" class="btn">Snapshot</button>
-      </div>
-
-      <div style="margin-top:10px" class="muted">Pastikan izinkan kamera ketika browser meminta.</div>
-    </div>
-  </div>
-
-  <aside>
-    <div class="card info">
-      <div><span class="label">Status Model:</span> <span id="modelStatus" class="small">Belum dimuat</span></div>
-      <div style="margin-top:8px"><span class="label">Objek:</span> <span id="infoClass">-</span></div>
-      <div><span class="label">Warna:</span> <span id="infoColor">-</span></div>
-      <div><span class="label">Estimasi Jarak:</span> <span id="infoDist">-</span></div>
-      <div style="margin-top:8px"><span class="label">FPS:</span> <span id="infoFps">-</span></div>
-
-      <hr style="margin:10px 0;border:none;border-top:1px solid rgba(255,255,255,0.02)">
-
-      <div class="small">Pengaturan</div>
-      <div style="margin-top:8px;display:flex;gap:8px;">
-        <label class="small">Threshold: <span id="thVal">0.45</span></label>
-      </div>
-      <input id="threshold" type="range" min="0.1" max="0.9" step="0.01" value="0.45" />
-
-      <div style="margin-top:10px" class="small">
-        Debug: Lihat Console (F12) jika kamera belum muncul atau model gagal dimuat.
-      </div>
-    </div>
-  </aside>
+<div id="container">
+    <video id="video" width="640" height="480" autoplay playsinline muted></video>
+    <canvas id="canvas" width="640" height="480" willReadFrequently="true"
+        style="position:absolute; top:0; left:0;"></canvas>
 </div>
 
-<!-- TFJS & COCO-SSD -->
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
-
 <script>
-/* ====== Utility: map RGB -> nama warna sederhana ====== */
-const NAMAWARNA = [
-  {name:'Merah', r:220,g:40,b:40},
-  {name:'Oren', r:255,g:140,b:50},
-  {name:'Kuning', r:240,g:220,b:60},
-  {name:'Hijau', r:50,g:200,b:80},
-  {name:'Biru', r:40,g:120,b:255},
-  {name:'Ungu', r:150,g:80,b:200},
-  {name:'Coklat', r:140,g:90,b:60},
-  {name:'Hitam', r:20,g:20,b:20},
-  {name:'Abu-abu', r:140,g:140,b:140},
-  {name:'Putih', r:240,g:240,b:240},
-  {name:'Pink', r:255,g:120,b:180}
-];
+let model;
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
-function namaWarnaFromRGB(r,g,b){
-  let best=null, bestD=1e9;
-  NAMAWARNA.forEach(c=>{
-    const d = (r-c.r)**2 + (g-c.g)**2 + (b-c.b)**2;
-    if(d < bestD){ bestD=d; best=c; }
-  });
-  return best ? best.name : 'Tidak dikenal';
-}
-
-/* ====== Elements ====== */
-const video = document.getElementById('video');
-const overlay = document.getElementById('overlay');
-const ctx = overlay.getContext('2d');
-
-const btnStart = document.getElementById('btnStart');
-const btnStop  = document.getElementById('btnStop');
-const btnSnapshot = document.getElementById('btnSnapshot');
-
-const modelStatus = document.getElementById('modelStatus');
-const infoClass = document.getElementById('infoClass');
-const infoColor = document.getElementById('infoColor');
-const infoDist  = document.getElementById('infoDist');
-const infoFps   = document.getElementById('infoFps');
-
-const thresholdEl = document.getElementById('threshold');
-const thVal = document.getElementById('thVal');
-
-let model = null;
-let stream = null;
-let rafId = null;
-let lastTs = performance.now();
-let frames = 0;
-
-/* ====== Kamera ====== */
-async function startCamera(){
-  try{
-    btnStart.disabled = true;
-    const s = await navigator.mediaDevices.getUserMedia({
-      video:{ width: {ideal:1280}, height:{ideal:720}, facingMode: 'environment' },
-      audio:false
+// -------------------------------------------------------------
+// 🔵 Start Kamera
+// -------------------------------------------------------------
+async function startCamera() {
+    const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" }
     });
-    stream = s;
     video.srcObject = stream;
     await video.play();
-
-    // set canvas size to video size
-    overlay.width = video.videoWidth;
-    overlay.height = video.videoHeight;
-
-    // load model first time if not loaded
-    if(!model){
-      await loadModel();
-    }
-
-    // start loop
-    runDetectionLoop();
-    btnStop.disabled = false;
-  }catch(e){
-    console.error('Gagal akses kamera:', e);
-    alert('Gagal membuka kamera. Cek izin kamera di browser (allow) dan jalankan melalui HTTPS atau localhost.');
-    btnStart.disabled = false;
-  }
 }
 
-function stopCamera(){
-  if(stream){
-    stream.getTracks().forEach(t=>t.stop());
-    stream = null;
-  }
-  if(rafId) cancelAnimationFrame(rafId);
-  btnStart.disabled = false;
-  btnStop.disabled = true;
+// -------------------------------------------------------------
+// 🔵 Mengambil warna rata-rata dalam bounding box
+// -------------------------------------------------------------
+function getColorName(r, g, b) {
+    if (r > 200 && g < 80 && b < 80) return "Merah";
+    if (r > 200 && g > 120 && b < 80) return "Oranye";
+    if (r > 200 && g > 200 && b < 100) return "Kuning";
+    if (g > 180 && r < 100 && b < 100) return "Hijau";
+    if (b > 180 && r < 100 && g < 100) return "Biru";
+    if (r > 150 && g > 100 && b > 150) return "Ungu";
+    if (r > 200 && g > 200 && b > 200) return "Putih";
+    if (r < 80 && g < 80 && b < 80) return "Hitam";
+    return "Tidak diketahui";
 }
 
-/* ====== Load model ====== */
-async function loadModel(){
-  try{
-    modelStatus.innerText = 'Memuat model...';
-    model = await cocoSsd.load();
-    modelStatus.innerText = 'Model siap ✔';
-    console.log('Model coco-ssd siap.');
-  }catch(e){
-    console.error('Gagal memuat model:', e);
-    modelStatus.innerText = 'Gagal memuat model (lihat console)';
-  }
+// -------------------------------------------------------------
+// 🔵 Estimasi jarak (kasar)
+// -------------------------------------------------------------
+function estimasiJarak(boxHeightPx) {
+    const tinggiAsli = 20; // cm (asumsi tinggi objek)
+    const focalLength = 500; 
+    return Math.round((tinggiAsli * focalLength) / boxHeightPx);
 }
 
-/* ====== Helper distance (simple estimation) ======
-   Menggunakan focal-length-like formula:
-   distance(cm) = (knownWidth_cm * focalLength) / pixelWidth
-   focalLength diset empiris; knownWidth diset asumsi (bisa di-tweak).
-*/
-function estimateDistanceCm(pixelWidth, knownWidthCm = 20){
-  const focalLength = 800; // nilai ini bisa diubah sesuai kamera untuk lebih akurat
-  if(pixelWidth <= 0) return 0;
-  return Math.round((knownWidthCm * focalLength) / pixelWidth);
-}
+// -------------------------------------------------------------
+// 🔵 Loop Deteksi
+// -------------------------------------------------------------
+async function detect() {
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-/* ====== Main detection loop ====== */
-async function runDetectionLoop(){
-  if(!model) {
-    console.warn('Model belum siap.');
-    return;
-  }
-  // draw loop
-  async function frame(){
-    // draw current video frame onto canvas (so getImageData works)
-    ctx.clearRect(0,0,overlay.width, overlay.height);
-    ctx.drawImage(video, 0, 0, overlay.width, overlay.height);
+    const predictions = await model.detect(canvas);
 
-    // run detection on video element (model.detect accepts video)
-    try{
-      const predictions = await model.detect(video);
+    predictions.forEach(pred => {
+        const [x, y, w, h] = pred.bbox;
 
-      // update FPS
-      frames++;
-      const now = performance.now();
-      if(now - lastTs >= 1000){
-        infoFps.innerText = frames + ' FPS';
-        frames = 0;
-        lastTs = now;
-      }
+        // Warna rata-rata
+        const imgData = ctx.getImageData(x, y, w, h);
+        let r = 0, g = 0, b = 0;
+        const pixels = imgData.data;
+        for (let i = 0; i < pixels.length; i += 4) {
+            r += pixels[i];
+            g += pixels[i + 1];
+            b += pixels[i + 2];
+        }
+        const total = pixels.length / 4;
+        r = r / total; g = g / total; b = b / total;
 
-      // draw boxes and info for each prediction above threshold
-      const thr = parseFloat(thresholdEl.value);
-      let primary = null;
-      predictions.forEach(pred=>{
-        if(pred.score < thr) return;
-        // use the first/highest score as primary
-        if(!primary) primary = pred;
+        const namaWarna = getColorName(r, g, b);
+        const jarak = estimasiJarak(h);
 
-        // bounding box
-        const [x,y,w,h] = pred.bbox;
-
-        // rectangle
+        // Gambar bounding box
+        ctx.strokeStyle = "#00FFC8";
         ctx.lineWidth = 3;
-        ctx.strokeStyle = 'rgba(0,210,255,0.95)';
-        ctx.shadowBlur = 12; ctx.shadowColor='rgba(0,210,255,0.4)';
-        ctx.strokeRect(x,y,w,h);
+        ctx.strokeRect(x, y, w, h);
 
-        // label background
-        ctx.shadowBlur = 0;
-        ctx.fillStyle = 'rgba(0,210,255,0.9)';
-        const label = pred.class + ' ' + (pred.score*100).toFixed(0) + '%';
-        ctx.font = '18px Arial';
-        const tw = ctx.measureText(label).width + 10;
-        ctx.fillRect(x, y - 28, tw, 26);
+        // Label
+        ctx.fillStyle = "rgba(0,0,0,0.7)";
+        ctx.fillRect(x, y - 40, 200, 40);
 
-        // label text
-        ctx.fillStyle = '#00121a';
-        ctx.fillText(label, x + 6, y - 6);
-      });
+        ctx.fillStyle = "#00FFC8";
+        ctx.font = "16px Arial";
+        ctx.fillText(
+            `${pred.class} | Warna: ${namaWarna} | Jarak: ${jarak} cm`,
+            x + 5, y - 15
+        );
+    });
 
-      if(primary){
-        // sample color at center of primary bbox (sample area 5x5)
-        const [x,y,w,h] = primary.bbox;
-        const sx = Math.max(0, Math.floor(x + w/2) - 2);
-        const sy = Math.max(0, Math.floor(y + h/2) - 2);
-        const sw = Math.min(5, overlay.width - sx);
-        const sh = Math.min(5, overlay.height - sy);
-
-        let rSum=0,gSum=0,bSum=0,count=0;
-        try{
-          const img = ctx.getImageData(sx, sy, sw, sh);
-          for(let i=0;i<img.data.length;i+=4){
-            rSum += img.data[i];
-            gSum += img.data[i+1];
-            bSum += img.data[i+2];
-            count++;
-          }
-        }catch(e){
-          console.warn('getImageData error', e);
-        }
-        if(count>0){
-          const r = Math.round(rSum/count);
-          const g = Math.round(gSum/count);
-          const b = Math.round(bSum/count);
-          const colorName = namaWarnaFromRGB(r,g,b);
-          infoColor.innerText = colorName + ` (rgb: ${r},${g},${b})`;
-        } else {
-          infoColor.innerText = '-';
-        }
-
-        // update objek text
-        infoClass.innerText = primary.class + ' (' + (primary.score*100).toFixed(0) + '%)';
-
-        // estimate distance using bbox width (pixel)
-        const distCm = estimateDistanceCm(primary.bbox[2], 20); // asumsi lebar objek 20cm
-        infoDist.innerText = distCm + ' cm (estimasi)';
-
-      } else {
-        infoClass.innerText = '-';
-        infoColor.innerText = '-';
-        infoDist.innerText = '-';
-      }
-
-    }catch(err){
-      console.error('Detect error', err);
-    }
-
-    rafId = requestAnimationFrame(frame);
-  }
-
-  frame();
+    requestAnimationFrame(detect);
 }
 
-/* ====== UI Wiring ====== */
-btnStart.addEventListener('click', startCamera);
-btnStop.addEventListener('click', stopCamera);
-btnSnapshot.addEventListener('click', ()=>{
-  // snapshot overlay + video
-  const tmp = document.createElement('canvas');
-  tmp.width = overlay.width; tmp.height = overlay.height;
-  const tctx = tmp.getContext('2d');
-  // draw current video then overlay
-  tctx.drawImage(video,0,0,tmp.width,tmp.height);
-  tctx.drawImage(overlay,0,0);
-  const a = document.createElement('a');
-  a.href = tmp.toDataURL('image/png');
-  a.download = 'snapshot.png';
-  a.click();
-});
-
-// threshold UI
-thresholdEl.addEventListener('input', ()=> thVal.innerText = thresholdEl.value);
-
-/* ====== Auto-load model early (so user can start faster) ====== */
-(async ()=>{
-  // attempt to set fast backend (webgl) if available
-  try{ await tf.setBackend('webgl'); } catch(e){ /* ignore */ }
-  modelStatus.innerText = 'Memuat model...';
-  try{
+// -------------------------------------------------------------
+// 🔵 Start semuanya
+// -------------------------------------------------------------
+async function start() {
+    await startCamera();
     model = await cocoSsd.load();
-    modelStatus.innerText = 'Model siap ✔';
-    console.log('Model siap.');
-  }catch(e){
-    console.error('Gagal memuat model', e);
-    modelStatus.innerText = 'Gagal memuat (lihat console)';
-  }
-})();
+    console.log("Model siap!");
+    detect();
+}
+
+start();
 </script>
 </body>
 </html>
