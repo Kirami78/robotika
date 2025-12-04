@@ -1,545 +1,105 @@
-<!doctype html>
-<html lang="id">
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>EfficientDet-Lite (TFJS/TFLite) — Object Detector (MANTEP)</title>
+  <meta charset="UTF-8">
+  <title>Ultimate Object + Color + Distance Detection</title>
+
+  <!-- TensorFlow -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.2.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+
   <style>
-    :root{
-      --bg:#0b1220; --card:#0f1724; --accent:#00d1ff; --muted:#93a3b8;
-      --glass: rgba(255,255,255,0.03);
+    body {
+      margin: 0;
+      background: #0a0f19;
+      font-family: "Segoe UI", sans-serif;
+      overflow: hidden;
+      color: #fff;
     }
-    html,body{height:100%;margin:0;font-family:Inter, ui-sans-serif, system-ui; background:linear-gradient(180deg,var(--bg),#07101a); color:#e6f0fb;}
-    .wrap{max-width:1100px;margin:18px auto;padding:18px;display:grid;grid-template-columns: 1fr 360px; gap:18px;}
-    header{grid-column:1/-1; display:flex;align-items:center;gap:12px;}
-    header h1{margin:0;font-size:18px;letter-spacing:0.2px}
-    .card{background:var(--card);border-radius:12px;padding:12px;box-shadow: 0 6px 20px rgba(0,0,0,0.6); border:1px solid rgba(255,255,255,0.03);}
-    #viewer{position:relative;border-radius:10px; overflow:hidden;}
-    video, canvas{display:block;width:100%;height:auto;max-height:640px;background:#000;object-fit:cover;}
-    canvas{position:absolute;left:0;top:0;pointer-events:none;}
-    .controls{display:flex;flex-direction:column;gap:10px;}
-    label.small{font-size:12px;color:var(--muted);}
-    .row{display:flex;gap:8px;align-items:center;}
-    select,input[type="range"]{width:100%;}
-    button{padding:8px 10px;border-radius:8px;border:none;background:var(--accent);color:#012;cursor:pointer;font-weight:600;}
-    .muted{color:var(--muted);font-size:13px;}
-    #status{font-size:13px;color:var(--muted);margin-top:8px;}
-    .skeleton{height:10px;background:linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.06), rgba(255,255,255,0.02));border-radius:6px;}
-    .stats{display:flex;gap:8px;flex-wrap:wrap;}
-    .chip{background:var(--glass);padding:6px 8px;border-radius:8px;font-size:13px;color:var(--muted);}
-    .legend{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
-    .legend .item{display:flex;gap:6px;align-items:center;padding:6px 8px;background:rgba(255,255,255,0.02);border-radius:8px;font-size:13px}
-    footer{grid-column:1/-1;color:var(--muted);font-size:12px;margin-top:8px;}
+
+    h1 {
+      text-align: center;
+      margin-top: 20px;
+      color: #4fc3f7;
+      font-size: 32px;
+      text-shadow: 0 0 15px #4fc3f7;
+    }
+
+    #container {
+      position: relative;
+      width: 90vw;
+      max-width: 900px;
+      margin: auto;
+      margin-top: 25px;
+    }
+
+    video, canvas {
+      width: 100%;
+      border-radius: 16px;
+      box-shadow: 0 0 25px rgba(0,255,255,0.4);
+    }
+
+    #panel {
+      margin: auto;
+      margin-top: 20px;
+      width: 90vw;
+      max-width: 900px;
+      background: rgba(255,255,255,0.05);
+      padding: 20px;
+      border-radius: 12px;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(0,255,255,0.2);
+    }
+
+    #infoBox {
+      font-size: 15px;
+      line-height: 24px;
+    }
+
+    #fps {
+      margin-top: 8px;
+      color: #00eaff;
+      font-size: 18px;
+    }
+
+    .label-box {
+      background: rgba(0,255,255,0.8);
+      padding: 4px 8px;
+      border-radius: 5px;
+      font-size: 14px;
+      box-shadow: 0 0 10px cyan;
+    }
   </style>
 </head>
+
 <body>
-  <div class="wrap">
-    <header>
-      <h1>EfficientDet-Lite0 — Object Detector (TFJS + TFLite) — MANTEP</h1>
-      <div class="muted">Fast | Accurate for small objects | Runs fully in-browser</div>
-    </header>
 
-    <div class="card" id="left">
-      <div id="viewer">
-        <video id="video" autoplay playsinline muted></video>
-        <canvas id="overlay"></canvas>
-      </div>
+<h1>Object • Color • Distance Detector (TensorFlow)</h1>
 
-      <div style="display:flex;gap:10px;margin-top:10px;align-items:center;">
-        <button id="start">Start Camera</button>
-        <button id="stop" disabled>Stop</button>
-        <button id="snapshot">Snapshot</button>
-        <input id="file" type="file" accept="image/*,video/*" style="margin-left:auto">
-      </div>
+<div id="container">
+  <video id="video" autoplay playsinline></video>
+  <canvas id="canvas"></canvas>
+</div>
 
-      <div id="status" class="card" style="margin-top:12px;">
-        <div id="modelStatus">Model: <span class="muted">memuat...</span></div>
-        <div style="margin-top:6px;" class="stats">
-          <div class="chip">FPS: <span id="fps">-</span></div>
-          <div class="chip">Objects: <span id="objCount">-</span></div>
-          <div class="chip">Backend: <span id="backend">tfjs</span></div>
-        </div>
-        <div id="log" class="muted" style="margin-top:8px">Tip: tambahkan pencahayaan kalau deteksi kurang akurat.</div>
-      </div>
-    </div>
+<div id="panel">
+  <div id="infoBox">Detecting objects...</div>
+  <div id="fps"></div>
+</div>
 
-    <aside class="card">
-      <div class="controls">
-        <label class="small">Model (.tflite) path (taruh file di folder yang sama)</label>
-        <input id="modelUrl" type="text" value="./efficientdet_lite0.tflite" />
-        <div class="row">
-          <label class="small">Confidence threshold</label>
-          <input id="threshold" type="range" min="0.1" max="0.9" step="0.01" value="0.25"/>
-        </div>
-        <div class="row">
-          <label class="small">Max detections</label>
-          <input id="maxDet" type="number" min="1" max="100" value="50" style="width:100px"/>
-        </div>
+<script>
 
-        <div class="row">
-          <label class="small">Backend</label>
-          <select id="backendSelect">
-            <option value="webgl">WebGL</option>
-            <option value="wasm">WASM</option>
-          </select>
-        </div>
+// Global
+let model;
+let previousTime = performance.now();
+let fpsCounter = document.getElementById("fps");
 
-        <div style="display:flex;gap:8px;">
-          <button id="loadModel">Load/Reload Model</button>
-          <button id="warmup">Warm Up</button>
-        </div>
-
-        <div class="legend" id="legend"></div>
-
-        <div style="margin-top:8px;">
-          <div class="muted">Notes:</div>
-          <ul class="muted" style="padding-left:18px;margin:6px 0;">
-            <li>Tempatkan file <code>efficientdet_lite0.tflite</code> di folder yang sama atau ganti path di atas.</li>
-            <li>Jalankan lewat local server agar model dapat di-fetch (mis. <code>npx http-server</code>).</li>
-          </ul>
-        </div>
-      </div>
-    </aside>
-
-    <footer>
-      Menggunakan TF.js TFLite runtime (tflite.loadTFLiteModel) & EfficientDet-Lite (ringan & cocok untuk web). Model TFLite bisa diambil dari TensorFlow Hub / Colab. (TFJS TFLite docs & EfficientDet-Lite reference). 
-    </footer>
-  </div>
-
-  <!-- TensorFlow.js core -->
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
-  <!-- TFJS TFLite runtime (enables running .tflite in browser) -->
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-tflite@0.0.1-alpha.8/dist/tf-tflite.min.js"></script>
-
-  <script>
-  // Short citations for developer: tfjs-tflite allows loading .tflite in browser; EfficientDet-Lite exists on TF Hub.
-  // See: https://js.tensorflow.org/api_tflite/ and TensorFlow blog for EfficientDet-Lite.
-  // (We used web.run for references when building this.)
-
-  const video = document.getElementById('video');
-  const overlay = document.getElementById('overlay');
-  const ctx = overlay.getContext('2d');
-  const startBtn = document.getElementById('start');
-  const stopBtn = document.getElementById('stop');
-  const snapshotBtn = document.getElementById('snapshot');
-  const fileIn = document.getElementById('file');
-  const modelUrlInput = document.getElementById('modelUrl');
-  const loadBtn = document.getElementById('loadModel');
-  const warmupBtn = document.getElementById('warmup');
-  const thresholdEl = document.getElementById('threshold');
-  const maxDetEl = document.getElementById('maxDet');
-  const backendSelect = document.getElementById('backendSelect');
-
-  const statusModel = document.getElementById('modelStatus');
-  const fpsEl = document.getElementById('fps');
-  const objCount = document.getElementById('objCount');
-  const backendLabel = document.getElementById('backend');
-  const legend = document.getElementById('legend');
-
-  let tfliteModel = null;
-  let stream = null;
-  let rafId = null;
-  let lastTime = performance.now();
-  let frames = 0;
-
-  // A simple colors map for classes (we'll generate on the fly)
-  function colorForClass(i){
-    const hues = [200, 160, 120, 60, 320, 0, 30, 280, 20, 40];
-    const h = hues[i % hues.length];
-    return `hsl(${h} 85% 55%)`;
-  }
-
-  // Setup video (camera)
-  async function startCamera(){
-    try{
-      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio:false });
-      video.srcObject = stream;
-      await video.play();
-      resizeCanvas();
-      startBtn.disabled = true;
-      stopBtn.disabled = false;
-      runLoop();
-    }catch(e){
-      alert('Gagal akses kamera: ' + e.message);
-      console.error(e);
-    }
-  }
-
-  function stopCamera(){
-    if(stream){
-      stream.getTracks().forEach(t => t.stop());
-    }
-    stream = null;
-    video.pause();
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
-    if(rafId) cancelAnimationFrame(rafId);
-    ctx.clearRect(0,0,overlay.width,overlay.height);
-  }
-
-  function resizeCanvas(){
-    overlay.width = video.videoWidth || video.clientWidth;
-    overlay.height = video.videoHeight || video.clientHeight;
-  }
-
-  // Load TFLite model (path must be reachable by browser)
-  async function loadTFLiteModel(url){
-    statusModel.innerHTML = 'Model: <span class="muted">memuat...</span>';
-    try{
-      // Set TF backend choice (webgl or wasm)
-      const chosen = backendSelect.value;
-      if(chosen === 'webgl'){
-        await tf.setBackend('webgl');
-      } else {
-        await tf.setBackend('wasm');
-      }
-      backendLabel.textContent = tf.getBackend();
-
-      // load .tflite model via tf.tflite (API from tfjs-tflite)
-      tfliteModel = await tflite.loadTFLiteModel(url);
-      statusModel.innerHTML = 'Model: <span style="color:var(--accent)">siap</span>';
-      // optional: build legend from model metadata? we generically show common COCO labels if available below
-      populateLegend();
-    }catch(e){
-      console.error('load model err', e);
-      statusModel.innerHTML = 'Model: <span class="muted">gagal memuat — lihat console</span>';
-      alert('Gagal memuat model. Pastikan path benar dan jalankan lewat server (http).');
-    }
-  }
-
-  // Warm up model with a dummy tensor (faster subsequent inference)
-  async function warmupModel(){
-    if(!tfliteModel) return alert('Model belum dimuat.');
-    statusModel.innerHTML = 'Model: warming up...';
-    try{
-      // create dummy input (use fromPixels) sized to model input (we detect shape automatically below)
-      // many TFLite detection models use input shape [1,h,w,3] e.g. 320 or 512.
-      // We'll use a small canvas to create a tensor from pixels.
-      const w = 320, h = 320;
-      const tmp = document.createElement('canvas'); tmp.width = w; tmp.height = h;
-      const tctx = tmp.getContext('2d'); tctx.fillStyle='#777'; tctx.fillRect(0,0,w,h);
-      const img = tf.browser.fromPixels(tmp).expandDims(0).toFloat().div(255);
-      // call predict (tfliteModel.predict returns tensors or arrays depending on model)
-      try{
-        const out = await tfliteModel.predict(img);
-        // dispose outputs if tf.Tensors
-        if(Array.isArray(out)){
-          out.forEach(t => tf.dispose(t));
-        } else if(out && typeof out.dispose === 'function'){
-          out.dispose();
-        }
-      }catch(e){
-        console.warn('warmup predict err', e);
-      } finally {
-        img.dispose();
-      }
-      statusModel.innerHTML = 'Model: warmed up ✔';
-    }catch(e){
-      console.error(e);
-      statusModel.innerHTML = 'Model: warmup gagal';
-    }
-  }
-
-  // Try to be flexible parsing outputs:
-  // Many TFLite detection models return multiple outputs:
-  // - boxes (shape [1,num,4]) or flattened
-  // - classes (shape [1,num])
-  // - scores (shape [1,num])
-  // - num (shape [1])
-  // We'll inspect output tensors and route accordingly.
-  function parseDetections(output, maxDet){
-    // output may be a dict-like object with tensors or an array.
-    // Normalize to an object with names -> typed arrays
-    const outs = {};
-    if(output == null) return [];
-    // If output is a map-like, copy keys:
-    if(typeof output === 'object' && !Array.isArray(output) && !(output.dataSync)){
-      for(const k of Object.keys(output)){
-        const t = output[k];
-        outs[k] = (t.dataSync ? t.dataSync() : t);
-      }
-    } else if(Array.isArray(output)){
-      // If it's an array, we don't have names. Heuristic:
-      // common ordering: boxes, classes, scores, num
-      for(let i=0;i<output.length;i++){
-        const t = output[i];
-        outs['o'+i] = (t.dataSync ? t.dataSync() : t);
-      }
-    } else if(output.dataSync){
-      outs['o0'] = output.dataSync();
-    }
-
-    // Heuristic detection:
-    // find arrays that look like boxes (len multiple of 4), scores (<=1), classes (small ints)
-    const arrays = Object.values(outs);
-    const names = Object.keys(outs);
-
-    let boxes=null, scores=null, classes=null, num=null;
-
-    // Try named keys first
-    for(const k of names){
-      const arr = outs[k];
-      if(k.toLowerCase().includes('box') && arr.length >= 4) boxes = arr;
-      if(k.toLowerCase().includes('score') && arr.length >= 1) scores = arr;
-      if(k.toLowerCase().includes('class') && arr.length >= 1) classes = arr;
-      if(k.toLowerCase().includes('num')) num = arr;
-    }
-
-    // Fallback heuristics
-    if(!boxes){
-      // pick the longest that is multiple of 4
-      for(const arr of arrays){
-        if(arr.length >= 4 && (arr.length % 4) === 0 && arr.length/4 <= 200){
-          boxes = arr; break;
-        }
-      }
-    }
-    if(!scores){
-      // pick array with values in [0,1] or decimals
-      for(const arr of arrays){
-        if(arr === boxes) continue;
-        const max = Math.max(...arr);
-        const min = Math.min(...arr);
-        if(max <= 1.01 && min >= -0.01 && arr.length > 0){ scores = arr; break; }
-      }
-    }
-    if(!classes){
-      // pick array with small integer values
-      for(const arr of arrays){
-        if(arr === boxes || arr === scores) continue;
-        const max = Math.max(...arr);
-        if(max < 500 && arr.length > 0){ classes = arr; break; }
-      }
-    }
-    if(!num){
-      for(const arr of arrays){
-        if(arr.length === 1 && Number.isInteger(arr[0])) num = arr;
-      }
-    }
-
-    // Now construct result list
-    const results = [];
-    if(!boxes || !scores) return results;
-
-    // if boxes is flattened [N*4] -> convert to Nx4
-    let n = Math.floor(boxes.length / 4);
-    if(num && num.length>0) n = Math.min(n, Math.floor(num[0]));
-    n = Math.min(n, maxDet || 100);
-
-    for(let i=0;i<n;i++){
-      const bx = boxes[i*4 + 0];
-      const by = boxes[i*4 + 1];
-      const bw = boxes[i*4 + 2];
-      const bh = boxes[i*4 + 3];
-      const sc = scores[i] ?? (scores[i*1] || 0);
-      const cls = classes ? classes[i] : 0;
-      results.push({bx,by,bw,bh,score:sc,class:Math.round(cls)});
-    }
-
-    return results;
-  }
-
-  // Draw detections (EfficientDet-lite box format might be [ymin,xmin,ymax,xmax] or [x,y,w,h] depending on model.
-  // We'll try both heuristics: if values in [0,1] treat as normalized; detect pattern by checking ranges.
-  function drawDetections(dets){
-    ctx.clearRect(0,0,overlay.width,overlay.height);
-    const thr = parseFloat(thresholdEl.value);
-    let count = 0;
-    dets.forEach((d, idx) => {
-      if(d.score < thr) return;
-      // determine if normalized (0..1) or absolute
-      const isNormalized = (d.bx <= 1.01 && d.by <= 1.01 && d.bw <= 1.01 && d.bh <= 1.01);
-      let x,y,w,h;
-      if(isNormalized){
-        // Could be [cx,cy,w,h] OR [xmin,ymin,xmax,ymax] OR [ymin,xmin,ymax,xmax]
-        // Try interpret as [cx,cy,w,h] if center coords make sense (bw small)
-        if(d.bw <= 1 && d.bh <= 1 && Math.abs(d.bx) <= 1 && Math.abs(d.by) <= 1){
-          // assume center format
-          x = (d.bx - d.bw/2) * overlay.width;
-          y = (d.by - d.bh/2) * overlay.height;
-          w = d.bw * overlay.width;
-          h = d.bh * overlay.height;
-        } else {
-          // fallback assume [ymin,xmin,ymax,xmax]
-          const ymin = d.bx, xmin = d.by, ymax = d.bw, xmax = d.bh;
-          x = xmin * overlay.width;
-          y = ymin * overlay.height;
-          w = (xmax - xmin) * overlay.width;
-          h = (ymax - ymin) * overlay.height;
-        }
-      } else {
-        // absolute values: could be [x,y,w,h] or [xmin,ymin,xmax,ymax]
-        // heuristics: if values > overlay width -> maybe [xmin,ymin,xmax,ymax]
-        if(d.bw > overlay.width || d.bh > overlay.height){
-          // assume [xmin,ymin,xmax,ymax]
-          const xmin = d.bx, ymin = d.by, xmax = d.bw, ymax = d.bh;
-          x = xmin; y = ymin; w = xmax - xmin; h = ymax - ymin;
-        } else {
-          x = d.bx; y = d.by; w = d.bw; h = d.bh;
-        }
-      }
-
-      // clip
-      x = Math.max(0, x); y = Math.max(0,y); w = Math.min(overlay.width - x, w); h = Math.min(overlay.height - y, h);
-
-      const clsId = d.class;
-      const col = colorForClass(clsId);
-      // box
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = col;
-      ctx.strokeRect(x, y, w, h);
-      // label bg
-      const label = `Class ${clsId} ${(d.score*100).toFixed(1)}%`;
-      ctx.fillStyle = col;
-      ctx.font = '16px Inter, Arial';
-      const tw = ctx.measureText(label).width + 8;
-      ctx.fillRect(x, y - 24, tw, 22);
-      ctx.fillStyle = '#061119';
-      ctx.fillText(label, x + 6, y - 6);
-
-      count++;
-    });
-    objCount.textContent = count;
-  }
-
-  // The main loop: grab frame, run predict, parse and draw
-  async function runLoop(){
-    if(!tfliteModel) {
-      rafId = requestAnimationFrame(runLoop);
-      return;
-    }
-    if(video.readyState < 2){
-      rafId = requestAnimationFrame(runLoop);
-      return;
-    }
-    // measure FPS
-    const now = performance.now();
-    frames++;
-    if(now - lastTime >= 1000){
-      fpsEl.textContent = frames;
-      frames = 0;
-      lastTime = now;
-    }
-
-    resizeCanvas();
-    try{
-      // capture frame into tf tensor
-      const inputTensor = tf.tidy(()=>{
-        let t = tf.browser.fromPixels(video).toFloat(); // [h,w,3]
-        // many tflite detection models expect fixed size e.g. 320x320
-        // We will resize to 320x320 (common for EfficientDet-Lite0)
-        const target = 320;
-        t = tf.image.resizeBilinear(t, [target, target]);
-        // normalize to [0,1]
-        t = t.div(255.0);
-        // expand dims: [1,h,w,3]
-        t = t.expandDims(0);
-        return t;
-      });
-
-      // Predict: tfliteModel.predict returns Tensors or array-like (depends on binding)
-      const output = await tfliteModel.predict(inputTensor);
-
-      // Parse outputs / heuristic
-      const dets = parseDetections(output, parseInt(maxDetEl.value || 50));
-      drawDetections(dets);
-
-      // dispose outputs if they are tensors (tflite lib may return plain arrays; if tensors, dispose)
-      if(output && typeof output.forEach === 'function'){
-        output.forEach(t => { if(t && t.dispose) t.dispose(); });
-      } else if(output && output.dispose){
-        output.dispose();
-      }
-
-      inputTensor.dispose();
-    }catch(e){
-      console.warn('inference error', e);
-    }
-    rafId = requestAnimationFrame(runLoop);
-  }
-
-  // UI wiring
-  startBtn.addEventListener('click', startCamera);
-  stopBtn.addEventListener('click', stopCamera);
-  snapshotBtn.addEventListener('click', ()=>{
-    const tmp = document.createElement('canvas');
-    tmp.width = overlay.width; tmp.height = overlay.height;
-    const tctx = tmp.getContext('2d');
-    tctx.drawImage(video, 0, 0, tmp.width, tmp.height);
-    tctx.drawImage(overlay, 0, 0);
-    const a = document.createElement('a');
-    a.href = tmp.toDataURL('image/png');
-    a.download = 'snapshot.png';
-    a.click();
+async function initCamera() {
+  const video = document.getElementById("video");
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: "environment" }
   });
+  video.srcObject = stream;
 
-  fileIn.addEventListener('change', async (ev)=>{
-    const f = ev.target.files[0];
-    if(!f) return;
-    stopCamera();
-    const url = URL.createObjectURL(f);
-    if(f.type.startsWith('image/')){
-      // show image
-      const img = new Image();
-      img.onload = () => {
-        overlay.width = img.width; overlay.height = img.height;
-        const c=overlay.getContext('2d'); c.clearRect(0,0,overlay.width,overlay.height);
-        c.drawImage(img,0,0);
-      };
-      img.src = url;
-    } else if(f.type.startsWith('video/')){
-      video.srcObject = null;
-      video.src = url;
-      await video.play();
-      runLoop();
-    }
-  });
-
-  loadBtn.addEventListener('click', async ()=>{
-    const url = modelUrlInput.value.trim();
-    if(!url) return alert('Masukkan path model .tflite');
-    await loadTFLiteModel(url);
-  });
-
-  warmupBtn.addEventListener('click', warmupModel);
-
-  // generate legend sample (we don't have class names embedded reliably, so show some sample common classes)
-  function populateLegend(){
-    legend.innerHTML = '';
-    const sample = ['person','bicycle','car','chair','laptop','mouse','keyboard','bottle','cup','book'];
-    sample.forEach((s,i)=>{
-      const el = document.createElement('div'); el.className='item';
-      const dot = document.createElement('div'); dot.style.width='12px'; dot.style.height='12px';
-      dot.style.borderRadius='50%'; dot.style.background = colorForClass(i);
-      dot.style.boxShadow = '0 2px 8px rgba(0,0,0,0.6)';
-      el.appendChild(dot);
-      const t = document.createElement('div'); t.textContent = s; t.style.marginLeft='6px';
-      el.appendChild(t);
-      legend.appendChild(el);
-    });
-  }
-
-  // On load: set default backend to webgl if available
-  (async ()=>{
-    // prefer webgl if possible
-    if(tf.backend().isBackendRegistered && tf.engine().registry['webgl']) {
-      try{ await tf.setBackend('webgl'); backendLabel.textContent = tf.getBackend(); }catch(e){}
-    }
-    populateLegend();
-    // set default model path value remains ./efficientdet_lite0.tflite
-  })();
-
-  // Helpful: prevent page from sleeping on mobile while app running (optional)
-  if('wakeLock' in navigator){
-    let wakelock = null;
-    window.addEventListener('visibilitychange', async () => {
-      if(document.visibilityState === 'visible' && stream){
-        try{ wakelock = await navigator.wakeLock.request('screen'); }catch(e){}
-      } else {
-        if(wakelock){ wakelock.release(); wakelock = null; }
-      }
-    });
-  }
-  </script>
-</body>
-</html>
+  return new Promise(resolve => {
+    video.onloadedmetadata = () => {
+      res
