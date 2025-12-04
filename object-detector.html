@@ -1,300 +1,229 @@
 <!doctype html>
 <html lang="id">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Object Detector — TensorFlow.js (COCO-SSD)</title>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Object Detector — TensorFlow.js (NON-MIRROR)</title>
+
   <style>
-    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin: 12px; background:#f7f7fb; color:#111; }
-    h1 { font-size:1.25rem; margin-bottom:6px; }
-    #controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
-    select, button, input { padding:8px 10px; border-radius:8px; border:1px solid #d0d4db; background:white; }
-    #videoContainer { position:relative; width:100%; max-width:900px; background:#222; border-radius:10px; overflow:hidden; }
-    video { display:block; width:100%; height:auto; transform:scaleX(-1); } /* mirror for webcam */
-    canvas { position:absolute; left:0; top:0; pointer-events:none; transform:scaleX(-1); } /* draw mirrored boxes */
-    #log { margin-top:10px; font-size:0.9rem; color:#333; max-width:900px; white-space:pre-wrap; background:#fff; padding:8px; border-radius:8px; border:1px solid #e2e6ef; }
-    .small { font-size:0.85rem; color:#555; }
-    footer { margin-top:14px; font-size:0.8rem; color:#666; }
+    body { font-family: Arial, sans-serif; margin: 12px; background:#f2f4f8; }
+    h1 { margin-bottom: 8px; font-size: 20px; }
+    #controls { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+    select, button, input {
+      padding:8px 10px;
+      border:1px solid #ccc;
+      border-radius:8px;
+      background:white;
+    }
+    #videoContainer {
+      position:relative;
+      width:100%;
+      max-width:900px;
+      background:#000;
+      border-radius:10px;
+      overflow:hidden;
+    }
+    video {
+      width:100%;
+      display:block;
+      height:auto;
+    }
+    canvas {
+      position:absolute;
+      top:0;
+      left:0;
+      pointer-events:none;
+    }
+    #log {
+      margin-top:10px;
+      padding:8px;
+      background:white;
+      border-radius:8px;
+      border:1px solid #ddd;
+      white-space:pre-wrap;
+    }
   </style>
 </head>
 <body>
-  <h1>Object Detector — TensorFlow.js (COCO-SSD)</h1>
-  <div id="controls">
-    <label class="small">Pilih kamera:
-      <select id="cameraSelect"></select>
-    </label>
-    <button id="startBtn">Start</button>
-    <button id="stopBtn" disabled>Stop</button>
-    <label class="small">Confidence threshold:
-      <input id="threshold" type="range" min="0" max="1" step="0.01" value="0.5" />
-      <span id="thVal">0.50</span>
-    </label>
-    <button id="snapBtn">Snapshot</button>
-    <input id="fileInput" type="file" accept="image/*,video/*" />
-  </div>
 
-  <div id="videoContainer">
-    <video id="video" playsinline autoplay muted></video>
-    <canvas id="overlay"></canvas>
-  </div>
+<h1>Object Detector — TensorFlow.js (NON-MIRROR)</h1>
 
-  <div id="log" aria-live="polite">Status: memuat model TensorFlow.js...</div>
+<div id="controls">
+  <label>Kamera:
+    <select id="cameraSelect"></select>
+  </label>
 
-  <footer>
-    Catatan: model COCO-SSD mendeteksi objek umum (person, bottle, dog, car, dll.) di browser tanpa mengirim data ke server.
-  </footer>
+  <button id="startBtn">Start</button>
+  <button id="stopBtn" disabled>Stop</button>
 
-  <!-- TensorFlow.js -->
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
-  <!-- COCO-SSD model -->
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+  <label>Threshold:
+    <input id="threshold" type="range" min="0" max="1" step="0.01" value="0.5">
+    <span id="thVal">0.50</span>
+  </label>
 
-  <script>
-  (async () => {
-    const video = document.getElementById('video');
-    const overlay = document.getElementById('overlay');
-    const ctx = overlay.getContext('2d');
-    const cameraSelect = document.getElementById('cameraSelect');
-    const startBtn = document.getElementById('startBtn');
-    const stopBtn = document.getElementById('stopBtn');
-    const log = document.getElementById('log');
-    const snapBtn = document.getElementById('snapBtn');
-    const fileInput = document.getElementById('fileInput');
-    const thresholdRange = document.getElementById('threshold');
-    const thVal = document.getElementById('thVal');
+  <button id="snapBtn">Snapshot</button>
+  <input id="fileInput" type="file" accept="image/*,video/*">
+</div>
 
-    let model = null;
-    let stream = null;
-    let running = false;
-    let detectLoopId = null;
+<div id="videoContainer">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="overlay"></canvas>
+</div>
 
+<div id="log">Status: memuat model...</div>
+
+<!-- TensorFlow.js -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
+<!-- COCO-SSD -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+
+<script>
+(async () => {
+  const video = document.getElementById("video");
+  const overlay = document.getElementById("overlay");
+  const ctx = overlay.getContext("2d");
+
+  const cameraSelect = document.getElementById("cameraSelect");
+  const startBtn = document.getElementById("startBtn");
+  const stopBtn = document.getElementById("stopBtn");
+  const log = document.getElementById("log");
+
+  const fileInput = document.getElementById("fileInput");
+  const snapBtn = document.getElementById("snapBtn");
+
+  const thresholdRange = document.getElementById("threshold");
+  const thVal = document.getElementById("thVal");
+
+  let stream = null;
+  let running = false;
+  let detectLoopId = null;
+  let model = null;
+
+  thVal.textContent = parseFloat(thresholdRange.value).toFixed(2);
+  thresholdRange.addEventListener("input", () => {
     thVal.textContent = parseFloat(thresholdRange.value).toFixed(2);
-    thresholdRange.addEventListener('input', () => { thVal.textContent = parseFloat(thresholdRange.value).toFixed(2); });
+  });
 
-    // 1) Load model
-    log.textContent = 'Status: memuat model coco-ssd (TensorFlow.js)…';
-    try {
-      model = await cocoSsd.load(); // default: mobilenet-based coco-ssd
-      log.textContent = 'Status: model siap — tekan Start untuk mulai deteksi.';
-    } catch (e) {
-      log.textContent = 'Gagal memuat model: ' + e;
-      console.error(e);
-      return;
-    }
+  log.textContent = "Status: memuat model COCO-SSD...";
+  model = await cocoSsd.load();
+  log.textContent = "Model siap — klik Start.";
 
-    // 2) enumerate cameras
-    async function updateCameraList() {
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        cameraSelect.innerHTML = '';
-        const cams = devices.filter(d => d.kind === 'videoinput');
-        cams.forEach((c,i) => {
-          const opt = document.createElement('option');
-          opt.value = c.deviceId;
-          opt.text = c.label || `Camera ${i+1}`;
-          cameraSelect.appendChild(opt);
-        });
-      } catch (e) {
-        console.warn('enumerateDevices error', e);
-      }
-    }
-    await updateCameraList();
+  async function updateCameras() {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cams = devices.filter(d => d.kind === "videoinput");
 
-    // 3) start / stop camera
-    async function startCamera() {
-      if (stream) stopCamera();
-      const deviceId = cameraSelect.value || undefined;
-      const constraints = { audio: false, video: { deviceId: deviceId ? { exact: deviceId } : undefined, width: { ideal: 640 }, height: { ideal: 480 } } };
-      try {
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
-        video.srcObject = stream;
-        await video.play();
-        resizeCanvasToVideo();
-        running = true;
-        startDetectionLoop();
-        startBtn.disabled = true;
-        stopBtn.disabled = false;
-        log.textContent = 'Status: kamera berjalan — memulai deteksi...';
-      } catch (e) {
-        log.textContent = 'Gagal mengakses kamera: ' + e.message;
-        console.error(e);
-      }
-    }
+    cameraSelect.innerHTML = "";
+    cams.forEach((c, i) => {
+      const opt = document.createElement("option");
+      opt.value = c.deviceId;
+      opt.text = c.label || `Camera ${i + 1}`;
+      cameraSelect.appendChild(opt);
+    });
+  }
+  await updateCameras();
 
-    function stopCamera() {
-      if (stream) {
-        stream.getTracks().forEach(t => t.stop());
-        stream = null;
-      }
-      running = false;
-      if (detectLoopId) cancelAnimationFrame(detectLoopId);
-      ctx.clearRect(0,0,overlay.width, overlay.height);
-      startBtn.disabled = false;
-      stopBtn.disabled = true;
-      log.textContent = 'Status: kamera dihentikan.';
-    }
+  async function startCamera() {
+    if (stream) stopCamera();
 
-    function resizeCanvasToVideo() {
-      overlay.width = video.videoWidth || video.clientWidth;
-      overlay.height = video.videoHeight || video.clientHeight;
-      overlay.style.width = video.clientWidth + 'px';
-    }
-
-    // 4) detection loop
-    async function detectFrame() {
-      if (!running || video.readyState < 2) {
-        detectLoopId = requestAnimationFrame(detectFrame);
-        return;
-      }
-
-      // run detection
-      try {
-        const predictions = await model.detect(video);
-        drawPredictions(predictions);
-      } catch (e) {
-        console.error('detect error', e);
-      }
-      detectLoopId = requestAnimationFrame(detectFrame);
-    }
-
-    function startDetectionLoop() {
-      if (!running) return;
-      detectLoopId = requestAnimationFrame(detectFrame);
-    }
-
-    // 5) draw boxes
-    function drawPredictions(predictions) {
-      resizeCanvasToVideo();
-      ctx.clearRect(0,0,overlay.width, overlay.height);
-      const confThreshold = parseFloat(thresholdRange.value);
-
-      // draw each detection
-      predictions.forEach(pred => {
-        const score = pred.score || 0;
-        if (score < confThreshold) return;
-
-        const [x, y, w, h] = pred.bbox;
-        // bounding box style
-        ctx.lineWidth = Math.max(2, Math.round(overlay.width / 200));
-        ctx.strokeStyle = 'rgba(0,150,255,0.9)';
-        ctx.fillStyle = 'rgba(0,150,255,0.2)';
-        ctx.strokeRect(x, y, w, h);
-        ctx.fillRect(x, y, w, Math.max(18, Math.round(overlay.height/30)));
-
-        // label background + text
-        const label = `${pred.class} ${(score*100).toFixed(1)}%`;
-        ctx.font = `${Math.max(12, Math.round(overlay.width/60))}px sans-serif`;
-        ctx.fillStyle = 'rgba(0,0,0,0.7)';
-        ctx.fillRect(x + 4, y + 2, ctx.measureText(label).width + 8, parseInt(ctx.font,10) + 6);
-        ctx.fillStyle = '#fff';
-        ctx.fillText(label, x + 8, y + parseInt(ctx.font,10) + 1);
-
-      });
-
-      // small status
-      log.textContent = `Status: mendeteksi — ${predictions.length} prediksi (threshold=${confThreshold.toFixed(2)}). Tekan Snapshot untuk menyimpan gambar.`;
-    }
-
-    // 6) snapshot
-    snapBtn.addEventListener('click', () => {
-      if (!overlay.width || !overlay.height) { alert('Video belum siap'); return; }
-      const tmp = document.createElement('canvas');
-      tmp.width = overlay.width;
-      tmp.height = overlay.height;
-      const tctx = tmp.getContext('2d');
-      // mirror back to normal orientation to save (flip horizontally)
-      tctx.translate(tmp.width, 0);
-      tctx.scale(-1, 1);
-      tctx.drawImage(video, 0, 0, tmp.width, tmp.height);
-      // draw overlay (bounding boxes) mirrored the same way
-      tctx.drawImage(overlay, 0, 0);
-      const dataUrl = tmp.toDataURL('image/png');
-      const a = document.createElement('a');
-      a.href = dataUrl;
-      a.download = 'snapshot.png';
-      a.click();
+    const deviceId = cameraSelect.value || undefined;
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { deviceId: deviceId ? { exact: deviceId } : undefined }
     });
 
-    // 7) file input (image/video)
-    fileInput.addEventListener('change', async (ev) => {
-      const file = ev.target.files[0];
-      if (!file) return;
-      stopCamera();
-      const url = URL.createObjectURL(file);
-      // if image -> show image and run detection once
-      if (file.type.startsWith('image/')) {
-        const img = new Image();
-        img.onload = async () => {
-          // set video element size by using image rendered to canvas
-          video.pause();
-          video.srcObject = null;
-          video.style.display = 'none';
-          overlay.width = img.width;
-          overlay.height = img.height;
-          overlay.style.width = Math.min(900, img.width) + 'px';
-          // draw image to offscreen canvas and run detection on it (coco-ssd accepts HTMLImageElement)
-          const off = document.createElement('canvas');
-          off.width = img.width;
-          off.height = img.height;
-          const offctx = off.getContext('2d');
-          offctx.drawImage(img,0,0);
-          const predictions = await model.detect(img);
-          // draw image as background
-          const bg = overlay.getContext('2d');
-          bg.clearRect(0,0,overlay.width, overlay.height);
-          bg.drawImage(img, 0, 0, overlay.width, overlay.height);
-          // draw detections
-          predictions.forEach(pred => {
-            if ((pred.score||0) < parseFloat(thresholdRange.value)) return;
-            const [x,y,w,h] = pred.bbox;
-            bg.strokeStyle = 'rgba(255,60,60,0.9)';
-            bg.lineWidth = 2;
-            bg.strokeRect(x,y,w,h);
-            bg.fillStyle = 'rgba(255,60,60,0.85)';
-            bg.fillRect(x, y-18, bg.measureText(pred.class).width+8, 18);
-            bg.fillStyle = '#fff';
-            bg.fillText(`${pred.class} ${(pred.score*100).toFixed(1)}%`, x+4, y-4);
-          });
-          log.textContent = `Status: foto dianalisis — ${predictions.length} prediksi.`;
-          URL.revokeObjectURL(url);
-        };
-        img.src = url;
-      } else if (file.type.startsWith('video/')) {
-        // play selected video in the video element and run detection on it
-        video.style.display = '';
-        video.srcObject = null;
-        video.src = url;
-        video.loop = true;
-        await video.play();
-        overlay.width = video.videoWidth || video.clientWidth;
-        overlay.height = video.videoHeight || video.clientHeight;
-        running = true;
-        startDetectionLoop();
-        log.textContent = 'Status: memutar video file dan mendeteksi...';
-      }
+    video.srcObject = stream;
+    await video.play();
+
+    resizeCanvas();
+    running = true;
+    detectLoop();
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+
+    log.textContent = "Kamera aktif. Mendeteksi objek...";
+  }
+
+  function stopCamera() {
+    if (stream) {
+      stream.getTracks().forEach(t => t.stop());
+    }
+    stream = null;
+    running = false;
+    cancelAnimationFrame(detectLoopId);
+    ctx.clearRect(0,0,overlay.width,overlay.height);
+
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+
+    log.textContent = "Kamera dihentikan.";
+  }
+
+  function resizeCanvas() {
+    overlay.width = video.videoWidth;
+    overlay.height = video.videoHeight;
+  }
+
+  async function detectLoop() {
+    if (!running) return;
+
+    if (video.readyState >= 2) {
+      const predictions = await model.detect(video);
+      draw(predictions);
+    }
+
+    detectLoopId = requestAnimationFrame(detectLoop);
+  }
+
+  function draw(pred) {
+    resizeCanvas();
+    ctx.clearRect(0,0,overlay.width,overlay.height);
+
+    const thr = parseFloat(thresholdRange.value);
+
+    pred.forEach(p => {
+      if (p.score < thr) return;
+
+      const [x,y,w,h] = p.bbox;
+
+      ctx.strokeStyle = "rgba(0,150,255,0.9)";
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x,y,w,h);
+
+      ctx.font = "18px Arial";
+      ctx.fillStyle = "rgba(0,150,255,0.8)";
+      const text = `${p.class} ${(p.score*100).toFixed(1)}%`;
+      ctx.fillRect(x, y - 20, ctx.measureText(text).width + 10, 20);
+
+      ctx.fillStyle = "white";
+      ctx.fillText(text, x + 5, y - 5);
     });
 
-    // UI events
-    startBtn.addEventListener('click', async () => { await startCamera(); });
-    stopBtn.addEventListener('click', () => { stopCamera(); });
-    cameraSelect.addEventListener('change', async () => {
-      if (stream) await startCamera();
-    });
+    log.textContent = `Mendeteksi... (${pred.length} objek)`;
+  }
 
-    // refresh camera list when permission changes or devices change
-    navigator.mediaDevices.addEventListener?.('devicechange', updateCameraList);
+  snapBtn.addEventListener("click", () => {
+    const tmp = document.createElement("canvas");
+    tmp.width = overlay.width;
+    tmp.height = overlay.height;
 
-    // initial resize when metadata loaded
-    video.addEventListener('loadedmetadata', () => {
-      resizeCanvasToVideo();
-    });
+    const tctx = tmp.getContext("2d");
 
-    // cleanup on page unload
-    window.addEventListener('beforeunload', () => {
-      stopCamera();
-    });
+    // TANPA MIRROR (normal)
+    tctx.drawImage(video, 0, 0);
+    tctx.drawImage(overlay, 0, 0);
 
-  })();
-  </script>
-</body>
-</html>
+    const url = tmp.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "snapshot.png";
+    a.click();
+  });
+
+  fileInput.addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    stopCamera();
+
+    const url = URL.createObjectURL(file);
+
+    if (file.type.startsWith("im
