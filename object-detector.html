@@ -1,105 +1,108 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <title>Ultimate Object + Color + Distance Detection</title>
+  <meta charset="UTF-8" />
+  <title>TFJS Object Detection - FIX CAMERA</title>
 
-  <!-- TensorFlow -->
+  <!-- Load TensorFlow -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.2.0/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
 
   <style>
     body {
+      background: black;
       margin: 0;
-      background: #0a0f19;
-      font-family: "Segoe UI", sans-serif;
-      overflow: hidden;
-      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      color: white;
+      font-family: Arial;
     }
-
-    h1 {
-      text-align: center;
-      margin-top: 20px;
-      color: #4fc3f7;
-      font-size: 32px;
-      text-shadow: 0 0 15px #4fc3f7;
-    }
-
-    #container {
-      position: relative;
-      width: 90vw;
-      max-width: 900px;
-      margin: auto;
-      margin-top: 25px;
-    }
-
     video, canvas {
-      width: 100%;
-      border-radius: 16px;
-      box-shadow: 0 0 25px rgba(0,255,255,0.4);
-    }
-
-    #panel {
-      margin: auto;
-      margin-top: 20px;
       width: 90vw;
-      max-width: 900px;
-      background: rgba(255,255,255,0.05);
-      padding: 20px;
-      border-radius: 12px;
-      backdrop-filter: blur(10px);
-      border: 1px solid rgba(0,255,255,0.2);
-    }
-
-    #infoBox {
-      font-size: 15px;
-      line-height: 24px;
-    }
-
-    #fps {
-      margin-top: 8px;
-      color: #00eaff;
-      font-size: 18px;
-    }
-
-    .label-box {
-      background: rgba(0,255,255,0.8);
-      padding: 4px 8px;
-      border-radius: 5px;
-      font-size: 14px;
-      box-shadow: 0 0 10px cyan;
+      max-width: 600px;
+      margin-top: 20px;
+      background: #222;
     }
   </style>
 </head>
 
 <body>
 
-<h1>Object • Color • Distance Detector (TensorFlow)</h1>
+<h2>Camera Test + Object Detection (FIXED)</h2>
 
-<div id="container">
-  <video id="video" autoplay playsinline></video>
-  <canvas id="canvas"></canvas>
-</div>
-
-<div id="panel">
-  <div id="infoBox">Detecting objects...</div>
-  <div id="fps"></div>
-</div>
+<video id="video" autoplay playsinline muted></video>
+<canvas id="canvas"></canvas>
 
 <script>
-
-// Global
 let model;
-let previousTime = performance.now();
-let fpsCounter = document.getElementById("fps");
 
 async function initCamera() {
   const video = document.getElementById("video");
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: "environment" }
-  });
-  video.srcObject = stream;
 
-  return new Promise(resolve => {
-    video.onloadedmetadata = () => {
-      res
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        facingMode: "environment"
+      },
+      audio: false
+    });
+
+    video.srcObject = stream;
+
+    return new Promise(resolve => {
+      video.onloadedmetadata = () => {
+        console.log("Camera ready:", video.videoWidth, "x", video.videoHeight);
+        video.play();
+        resolve(video);
+      };
+    });
+
+  } catch (err) {
+    console.error("Camera Error:", err);
+    alert("Tidak bisa membuka kamera.\nIjinkan kamera di browser kamu.");
+  }
+}
+
+async function start() {
+  const video = await initCamera();
+
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+
+  model = await cocoSsd.load();
+  console.log("Model loaded");
+
+  async function detect() {
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const predictions = await model.detect(video);
+
+    predictions.forEach(pred => {
+      const [x, y, w, h] = pred.bbox;
+
+      ctx.strokeStyle = "cyan";
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x, y, w, h);
+
+      ctx.fillStyle = "cyan";
+      ctx.font = "16px Arial";
+      ctx.fillText(pred.class + " " + (pred.score * 100).toFixed(1) + "%", x, y - 5);
+    });
+
+    requestAnimationFrame(detect);
+  }
+
+  detect();
+}
+
+start();
+</script>
+
+</body>
+</html>
