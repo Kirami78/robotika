@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Deteksi Objek • Warna Nama • Estimasi Jarak (FIXED)</title>
+<title>Deteksi Objek • Warna Nama • Estimasi Jarak (Stabil)</title>
 <style>
 /* --- VARS & GLOBAL --- */
   :root{ --accent:#00d1ff; --bg:#071019; --card:#0b1620; --muted:#98aab8; }
@@ -20,7 +20,7 @@
   h1{margin:0 0 8px 0;color:var(--accent);text-shadow:0 6px 30px rgba(0,200,255,0.06);}
   .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border-radius:12px;padding:15px;border:1px solid rgba(255,255,255,0.03);box-shadow:0 8px 30px rgba(0,0,0,0.6);}
   #viewport{position:relative;width:100%;height:480px;border-radius:10px;overflow:hidden;border:2px solid rgba(0,200,255,0.08);}
-  video{width:100%;height:100%;object-fit:cover;display:block; /* NO MIRROR */ }
+  video{width:100%;height:100%;object-fit:cover;display:block;}
   canvas{position:absolute;left:0;top:0;pointer-events:none;}
   
 /* --- INFO PANEL --- */
@@ -33,7 +33,7 @@
     display: inline-block; width: 20px; height: 20px; 
     border-radius: 4px; border: 2px solid var(--accent); 
     margin-right: 8px; vertical-align: middle; 
-    background: #333; /* default */
+    background: #333;
     transition: background-color 0.3s;
   }
   .stat-row { margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.04); }
@@ -49,13 +49,12 @@
   #btnSnapshot:hover:not(:disabled) { background: #ffbb4d; }
 
   .small{font-size:13px;color:var(--muted)}
-  pre{white-space:pre-wrap;margin:6px 0;color:#cfefff;background:rgba(0,0,0,0.08);padding:8px;border-radius:6px}
 </style>
 </head>
 <body>
 <div class="wrap">
   <div>
-    <h1>Deteksi Objek • Warna Nama • Estimasi Jarak</h1>
+    <h1>Deteksi Objek • Warna Nama • Estimasi Jarak (Stabil)</h1>
     <div class="card" id="viewerCard">
       <div id="viewport">
         <video id="video" autoplay playsinline muted></video>
@@ -100,7 +99,7 @@
       <input id="threshold" type="range" min="0.1" max="0.9" step="0.01" value="0.45" style="width:100%; margin-top:5px;"/>
 
       <div style="margin-top:15px" class="small">
-        Debug: Lihat Console (F12) jika kamera belum muncul atau model gagal dimuat.
+        Debug: Cek Console (F12) jika ada masalah.
       </div>
     </div>
   </aside>
@@ -128,14 +127,13 @@ const NAMAWARNA = [
 function namaWarnaFromRGB(r,g,b){
   let best=null, bestD=1e9;
   NAMAWARNA.forEach(c=>{
-    // Jarak Euclidean kuadrat dalam ruang RGB
     const d = (r-c.r)**2 + (g-c.g)**2 + (b-c.b)**2; 
     if(d < bestD){ bestD=d; best=c; }
   });
   return best ? best.name : 'Tidak dikenal';
 }
 
-/* ====== Elements ====== */
+/* ====== Elemen UI ====== */
 const video = document.getElementById('video');
 const overlay = document.getElementById('overlay');
 const ctx = overlay.getContext('2d');
@@ -147,7 +145,7 @@ const btnSnapshot = document.getElementById('btnSnapshot');
 const modelStatus = document.getElementById('modelStatus');
 const infoClass = document.getElementById('infoClass');
 const infoColor = document.getElementById('infoColor');
-const infoColorSwatch = document.getElementById('infoColorSwatch');
+const infoColorSwatch = document.getElementById('infoColorSwatch'); // Tambah Swatch
 const infoDist  = document.getElementById('infoDist');
 const infoFps   = document.getElementById('infoFps');
 
@@ -160,256 +158,70 @@ let rafId = null;
 let lastTs = performance.now();
 let frames = 0;
 
-/* ====== Kamera ====== */
-async function startCamera(){
-  try{
-    btnStart.disabled = true;
-    const s = await navigator.mediaDevices.getUserMedia({
-      video:{ width: {ideal:1280}, height:{ideal:720}, facingMode: 'environment' }, // Resolusi lebih besar
-      audio:false
-    });
-    stream = s;
-    video.srcObject = stream;
-    await video.play();
+/* ====== Variabel untuk Smoothing ====== */ 
+let lastBox = null; 
+let distHistory = []; 
 
-    // set canvas size to video size
-    overlay.width = video.videoWidth;
-    overlay.height = video.videoHeight;
+/* ====== FUNGSI BARU UNTUK STABILITAS DAN AKURASI ====== */
 
-    // load model first time if not loaded
-    if(!model){
-      await loadModel();
+/**
+ * Mengambil warna rata-rata dari area yang lebih besar (Dominant Color).
+ * @param {CanvasRenderingContext2D} ctx - Konteks Canvas.
+ * @param {number} x - Koordinat X.
+ * @param {number} y - Koordinat Y.
+ * @param {number} w - Lebar area.
+ * @param {number} h - Tinggi area.
+ * @returns {{r: number, g: number, b: number}} Objek RGB rata-rata.
+ */
+function getDominantColor(ctx, x, y, w, h) {
+  try {
+    // Pastikan koordinat tidak negatif
+    x = Math.max(0, x);
+    y = Math.max(0, y);
+    // Pastikan lebar/tinggi tidak melebihi batas canvas
+    w = Math.min(w, overlay.width - x);
+    h = Math.min(h, overlay.height - y);
+
+    if (w <= 0 || h <= 0) return { r: 0, g: 0, b: 0 };
+    
+    const img = ctx.getImageData(x, y, w, h);
+    let r = 0, g = 0, b = 0;
+    let count = 0;
+    for (let i = 0; i < img.data.length; i += 4) {
+      r += img.data[i];
+      g += img.data[i + 1];
+      b += img.data[i + 2];
+      count++;
     }
-
-    // start loop
-    runDetectionLoop();
-    btnStop.disabled = false;
-  }catch(e){
-    console.error('Gagal akses kamera:', e);
-    alert('Gagal membuka kamera. Cek izin kamera di browser (allow) dan jalankan melalui HTTPS atau localhost.');
-    btnStart.disabled = false;
+    r = Math.round(r / count);
+    g = Math.round(g / count);
+    b = Math.round(b / count);
+    return { r, g, b };
+  } catch (e) {
+    console.warn('Gagal ambil warna:', e);
+    return { r: 0, g: 0, b: 0 };
   }
 }
 
-function stopCamera(){
-  if(stream){
-    stream.getTracks().forEach(t=>t.stop());
-    stream = null;
-  }
-  if(rafId) cancelAnimationFrame(rafId);
-  btnStart.disabled = false;
-  btnStop.disabled = true;
-  // Reset info
-  infoClass.innerText = '-';
-  infoColor.innerText = '-';
-  infoColorSwatch.style.backgroundColor = '#333';
-  infoDist.innerText = '-';
-  infoFps.innerText = '-';
-  ctx.clearRect(0,0,overlay.width, overlay.height);
+/**
+ * Menerapkan smoothing (Exponential Moving Average) pada bounding box.
+ * @param {number[]} current - BBox saat ini [x, y, w, h].
+ * @returns {number[]} BBox yang telah di-smooth.
+ */
+function smoothBox(current) {
+  if (!lastBox) return lastBox = current;
+  const smooth = 0.7; // Semakin besar semakin halus, tapi semakin lambat merespon perubahan
+  return lastBox = [
+    lastBox[0] * smooth + current[0] * (1 - smooth),
+    lastBox[1] * smooth + current[1] * (1 - smooth),
+    lastBox[2] * smooth + current[2] * (1 - smooth),
+    lastBox[3] * smooth + current[3] * (1 - smooth)
+  ];
 }
 
-/* ====== Load model ====== */
-async function loadModel(){
-  try{
-    modelStatus.innerText = 'Memuat model...';
-    model = await cocoSsd.load();
-    modelStatus.innerText = 'Model siap ✔';
-    console.log('Model coco-ssd siap.');
-  }catch(e){
-    console.error('Gagal memuat model:', e);
-    modelStatus.innerText = 'Gagal memuat model (lihat console)';
-  }
-}
-
-/* ====== Helper distance (simple estimation) ======
-   Menggunakan focal-length-like formula:
-   distance(cm) = (knownWidth_cm * focalLength) / pixelWidth
-*/
-function estimateDistanceCm(pixelWidth, knownWidthCm = 20){
-  const focalLength = 800; // Nilai empiris untuk kamera web/smartphone
-  if(pixelWidth <= 0) return 0;
-  return Math.round((knownWidthCm * focalLength) / pixelWidth);
-}
-
-// Fungsi untuk mendapatkan lebar objek asumsi (dalam cm)
-function getKnownWidthCm(className){
-  switch(className){
-    case 'cell phone': return 8; // Ponsel 8 cm
-    case 'bottle': return 10;  // Botol 10 cm
-    case 'cup': return 8;      // Cangkir 8 cm
-    case 'person': return 40;  // Orang (lebar bahu) 40 cm
-    case 'book': return 15;    // Buku 15 cm
-    default: return 20; // Default untuk objek lain
-  }
-}
-
-/* ====== Main detection loop ====== */
-async function runDetectionLoop(){
-  if(!model || !stream) {
-    console.warn('Model atau stream kamera belum siap.');
-    return;
-  }
-  // draw loop
-  async function frame(){
-    // Clear canvas dan draw video frame
-    ctx.clearRect(0,0,overlay.width, overlay.height);
-    ctx.drawImage(video, 0, 0, overlay.width, overlay.height);
-
-    try{
-      const predictions = await model.detect(video);
-
-      // update FPS
-      frames++;
-      const now = performance.now();
-      if(now - lastTs >= 1000){
-        infoFps.innerText = frames + ' FPS';
-        frames = 0;
-        lastTs = now;
-      }
-
-      // draw boxes and info for each prediction above threshold
-      const thr = parseFloat(thresholdEl.value);
-      let primary = null; // Objek dengan skor tertinggi
-      
-      // Filter dan urutkan berdasarkan skor
-      const filteredPredictions = predictions
-        .filter(pred => pred.score >= thr)
-        .sort((a,b) => b.score - a.score);
-      
-      if(filteredPredictions.length > 0) primary = filteredPredictions[0];
-
-      filteredPredictions.forEach(pred=>{
-        // bounding box
-        const [x,y,w,h] = pred.bbox;
-
-        const isPrimary = pred === primary;
-        const label = pred.class + ' ' + (pred.score*100).toFixed(0) + '%';
-        
-        // Rectangle Style
-        ctx.lineWidth = isPrimary ? 4 : 2;
-        ctx.strokeStyle = isPrimary ? '#00FFFF' : 'rgba(0,210,255,0.7)'; 
-        ctx.shadowBlur = isPrimary ? 10 : 0; 
-        ctx.shadowColor = isPrimary ? 'rgba(0,255,255,0.8)' : 'rgba(0,210,255,0.4)';
-        ctx.strokeRect(x,y,w,h);
-
-        // Label background
-        ctx.shadowBlur = 0;
-        ctx.fillStyle = isPrimary ? '#00FFFF' : 'rgba(0,210,255,0.8)';
-        ctx.font = '700 16px Inter, Arial';
-        const tw = ctx.measureText(label).width + 10;
-        ctx.fillRect(x, y - 28, tw, 26);
-
-        // Label text
-        ctx.fillStyle = '#012'; 
-        ctx.fillText(label, x + 5, y - 8);
-        
-        // Tanda titik tengah untuk objek utama
-        if(isPrimary){
-          ctx.fillStyle = 'red';
-          ctx.beginPath();
-          ctx.arc(x + w/2, y + h/2, 4, 0, 2 * Math.PI);
-          ctx.fill();
-        }
-      });
-
-      if(primary){
-        // --- 1. SAMPLE COLOR ---
-        // sample color at center of primary bbox (sample area 5x5)
-        const [x,y,w,h] = primary.bbox;
-        // Pastikan area sampel tidak keluar batas canvas
-        const sx = Math.max(0, Math.floor(x + w/2) - 2);
-        const sy = Math.max(0, Math.floor(y + h/2) - 2);
-        const sw = Math.min(5, overlay.width - sx);
-        const sh = Math.min(5, overlay.height - sy);
-
-        let rSum=0,gSum=0,bSum=0,count=0;
-        try{
-          // Ambil data warna dari canvas (yang sudah digambar video di awal frame)
-          const img = ctx.getImageData(sx, sy, sw, sh); 
-          for(let i=0;i<img.data.length;i+=4){
-            rSum += img.data[i];
-            gSum += img.data[i+1];
-            bSum += img.data[i+2];
-            count++;
-          }
-        }catch(e){
-          console.warn('getImageData error', e);
-        }
-        
-        if(count>0){
-          const r = Math.round(rSum/count);
-          const g = Math.round(gSum/count);
-          const b = Math.round(bSum/count);
-          const colorName = namaWarnaFromRGB(r,g,b);
-          
-          // Update Info Warna
-          infoColor.innerText = colorName + ` (rgb: ${r},${g},${b})`;
-          infoColorSwatch.style.backgroundColor = `rgb(${r},${g},${b})`;
-        } else {
-          infoColor.innerText = 'Gagal Ambil Warna';
-          infoColorSwatch.style.backgroundColor = '#333';
-        }
-
-        // --- 2. UPDATE OBJEK TEXT ---
-        infoClass.innerText = primary.class + ' (' + (primary.score*100).toFixed(0) + '%)';
-
-        // --- 3. ESTIMATE DISTANCE ---
-        const knownWidth = getKnownWidthCm(primary.class); // Gunakan lebar asumsi dinamis
-        const distCm = estimateDistanceCm(primary.bbox[2], knownWidth); 
-        infoDist.innerText = distCm + ' cm (asumsi lebar ' + knownWidth + 'cm)';
-
-      } else {
-        // Reset info jika tidak ada objek terdeteksi
-        infoClass.innerText = '-';
-        infoColor.innerText = '-';
-        infoColorSwatch.style.backgroundColor = '#333';
-        infoDist.innerText = '-';
-      }
-
-    }catch(err){
-      console.error('Detect error', err);
-    }
-
-    rafId = requestAnimationFrame(frame);
-  }
-
-  frame();
-}
-
-/* ====== UI Wiring ====== */
-btnStart.addEventListener('click', startCamera);
-btnStop.addEventListener('click', stopCamera);
-btnSnapshot.addEventListener('click', ()=>{
-  // snapshot overlay + video
-  const tmp = document.createElement('canvas');
-  tmp.width = overlay.width; tmp.height = overlay.height;
-  const tctx = tmp.getContext('2d');
-  // draw current video then overlay
-  tctx.drawImage(video,0,0,tmp.width,tmp.height);
-  tctx.drawImage(overlay,0,0);
-  const a = document.createElement('a');
-  a.href = tmp.toDataURL('image/png');
-  a.download = 'snapshot-' + new Date().toISOString().replace(/[:.]/g,'-') + '.png';
-  a.click();
-});
-
-// threshold UI
-thresholdEl.addEventListener('input', ()=> thVal.innerText = thresholdEl.value);
-
-/* ====== Auto-load model early (so user can start faster) ====== */
-(async ()=>{
-  // attempt to set fast backend (webgl) if available
-  try{ await tf.setBackend('webgl'); } catch(e){ /* ignore */ }
-  modelStatus.innerText = 'Memuat model (Webgl)...';
-  try{
-    model = await cocoSsd.load();
-    modelStatus.innerText = 'Model siap ✔';
-    console.log('Model siap.');
-  }catch(e){
-    console.error('Gagal memuat model', e);
-    modelStatus.innerText = 'Gagal memuat (lihat console)';
-  }
-})();
-</script>
-</body>
-</html>
+/**
+ * Menerapkan smoothing (Moving Average) pada estimasi jarak (10 frame).
+ * @param {number} d - Jarak saat ini (cm).
+ * @returns {number} Jarak rata-rata yang telah di-smooth.
+ */
+function smoothDistance(d
