@@ -18,8 +18,8 @@ Nyalakan driver dan motor dengan baterai/power pack terpisah. Pastikan untuk men
 
 Dari ponsel atau laptop, sambungkan ke jaringan Wi-Fi yang dipancarkan ESP32:
 
-- SSID: **ESP32-Car**
-- Password: **12345678**
+- SSID: **Antariksa**
+- Password: **123456789**
 
 ### 4. Akses Kontrol Web
 
@@ -33,22 +33,21 @@ Tekan dan tahan tombol arah untuk menggerakkan mobil. Lepaskan tombol untuk berh
 
 Gunakan slider untuk mengatur kecepatan mobil sesuai keinginan.
 
-## Koneksi L9110S
+## Koneksi L 298 N
 
-Jika menggunakan driver motor L9110S (dengan pin A-1A/A-1B dan B-1A/B-1B), hubungkan sebagai berikut:
+Jika menggunakan driver motor L 298 N (dengan pin A-1A/A-1B dan B-1A/B-1B), hubungkan sebagai berikut:
 
 ### Diagram Koneksi
-ESP32 → L9110S Motor Driver
+ESP8266 Wemos D1 Mini → L 298 N Motor Driver
 
-| ESP32 GPIO | L9110S Pin | Fungsi |
-|------------|------------|--------|
-| 26         | A-1A       | Motor kiri - kontrol arah 1 |
-| 27         | A-1B       | Motor kiri - kontrol arah 2 |
-| 32         | B-1A       | Motor kanan - kontrol arah 1 |
-| 14         | B-1B       | Motor kanan - kontrol arah 2 |
-
-**Catatan:** Abaikan pin ENA/ENB pada L9110S (tidak ada). Untuk kontrol kecepatan, gunakan PWM pada GPIO25 untuk motor kiri dan GPIO33 untuk motor kanan.
-
+| ESP8266 Wemos D1 Mini | L 298 N Pin |                      Fungsi                        |
+|-----------------------|-------------|----------------------------------------------------|
+| D2                    | A-1A        | Motor kiri - kontrol arah 1                        |
+| D3                    | A-1B        | Motor kiri - kontrol arah 2                        |
+| D6                    | B-1A        | Motor kanan - kontrol arah 1                       |
+| D7                    | B-1B        | Motor kanan - kontrol arah 2                       |
+| GND                   | GND         | referensi tegangan/sinyal drivers dan clntroller.  |
+| 5V                    | UCC         | supply Energi motor                                |
 **Alternatif:** Jika ingin kontrol kecepatan yang lebih halus, pertimbangkan untuk menggunakan modul driver yang mendukung pin ENA/ENB seperti L298N atau L293D.
 
 ## Pemecahan Masalah
